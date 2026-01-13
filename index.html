@@ -3169,7 +3169,7 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Data</label>
-                        <input type="date" id="editData" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white" readonly />
+                        <input type="date" id="editData" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Frota</label>
@@ -6507,7 +6507,7 @@
                 mechEl.value = getDisplayName(u);
             }
             const d = document.getElementById('irrDataInspecao');
-            if (d) { const t = new Date().toISOString().split('T')[0]; d.value = t; d.max = t; }
+            if (d) { const t = new Date().toISOString().split('T')[0]; d.value = t; }
             clearIrrResults();
             toggleMobileBar(true);
             try {
@@ -8021,9 +8021,10 @@
                     inspections[idx].frota = frota;
                     inspections[idx].mecanico = mecanico;
                     inspections[idx].observacao = observacao;
+                    inspections[idx].data = data;
                     setCachedInspections(inspections);
                     if (isOnline() && currentUser && currentUser.id && inspections[idx].id) {
-                        const { error } = await supabase.from('inspections').update({ frota, mecanico, observacao }).eq('id', inspections[idx].id);
+                        const { error } = await supabase.from('inspections').update({ frota, mecanico, observacao, data }).eq('id', inspections[idx].id);
                         if (error) throw error;
                     }
                 }
@@ -10362,7 +10363,7 @@
                 const onlineBadge = online ? '<span class="ml-2 inline-block w-2 h-2 rounded-full bg-green-500" title="online"></span>' : '<span class="ml-2 inline-block w-2 h-2 rounded-full bg-gray-400" title="offline"></span>';
                 const fromPresenceOnly = (u.email_confirmed === undefined && u.approved === undefined);
                 const status = fromPresenceOnly ? 'Online • origem: presença' : `${emailConf ? 'Email confirmado' : 'Email não confirmado'} • ${approved ? 'Aprovado' : 'Pendente'}`;
-                const actions = fromPresenceOnly ? '<span class="text-xs text-gray-500">Aguardando cadastro</span>' : (approved ? `<button class="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md" onclick="blockUser('${u.email}')">Desativar</button>` : (emailConf ? `<button class="px-3 py-1 text-sm bg-green-600 text-white rounded-md" onclick="approveUser('${u.email}')">Aprovar</button>` : '<span class="text-xs text-gray-500">Aguardando confirmação de email</span>'));
+                const actions = fromPresenceOnly ? '<span class="text-xs text-gray-500">Aguardando cadastro</span>' : (approved ? `<button class="px-3 py-1 text-sm bg-yellow-600 text-white rounded-md" onclick="blockUser('${u.email}')">Desativar</button>` : `<button class="px-3 py-1 text-sm bg-green-600 text-white rounded-md" onclick="approveUser('${u.email}')">Aprovar</button>`);
                 const name = (u.name || u.email || '').toString();
                 const email = (u.email || '').toString();
                 return `
