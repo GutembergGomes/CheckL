@@ -7928,10 +7928,14 @@
                 const stateBadge = isPending
                     ? `<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 ml-2\">Pendente</span>`
                     : `<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 ml-2\">Sincronizado</span>`;
-                const actions = admin ? `
+                const adminActions = admin ? `
                     <button onclick=\"openEditInspection('${inspId}')\" class=\"ml-3 text-yellow-600 hover:text-yellow-700 text-sm font-medium\">Editar</button>
                     <button onclick=\"deleteInspection('${inspId}')\" class=\"ml-3 text-red-600 hover:text-red-700 text-sm font-medium\">Excluir</button>
                 ` : '';
+                const compareAction = `
+                    <button onclick=\"compareInspections('${inspId}')\" class=\"ml-3 text-blue-600 hover:text-blue-700 text-sm font-medium\">Comparar</button>
+                `;
+                const actions = adminActions + compareAction;
                 
                 return `
                     <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
@@ -8173,6 +8177,91 @@
             } catch (e) {
                 showCustomAlert(e.message || 'Falha ao excluir.');
             } finally { showLoading(false); }
+        }
+
+        function compareInspections(id) {
+            const matchId = String(id);
+            const all = getAllInspectionsCombined();
+            if (!Array.isArray(all) || all.length === 0) return;
+            const inspection = all.find(i => String(i.id) === matchId) || all.find(i => String(i.local_id) === matchId);
+            if (!inspection) return;
+            const sameFleet = all.filter(i => String(i.frota || '') === String(inspection.frota || '') && !(
+                String(i.id || '') === matchId || String(i.local_id || '') === matchId
+            ));
+            if (!sameFleet.length) { showCustomAlert('Nenhum outro lançamento encontrado para esta frota.'); return; }
+            sameFleet.sort((a, b) => dateOnlyToLocalDate(b.data) - dateOnlyToLocalDate(a.data));
+            const previous = sameFleet[0];
+            const currRes = inspection.results || {};
+            const prevRes = previous.results || {};
+            const currPercent = Number(currRes.percentage || 0);
+            const prevPercent = Number(prevRes.percentage || 0);
+            const currNotOk = Number(currRes.notOk || 0);
+            const prevNotOk = Number(prevRes.notOk || 0);
+            const diffPercent = currPercent - prevPercent;
+            const diffNotOk = currNotOk - prevNotOk;
+            const currItems = Array.isArray(inspection.items) ? inspection.items : [];
+            const prevItems = Array.isArray(previous.items) ? previous.items : [];
+            const newNotOk = currItems.filter(it => it.status === 'notok').filter(it => {
+                const byId = prevItems.find(p => String(p.id || '') === String(it.id || '') && p.status === 'notok');
+                if (byId) return false;
+                const byName = prevItems.find(p => String(p.name || '') === String(it.name || '') && String(p.section || '') === String(it.section || '') && p.status === 'notok');
+                return !byName;
+            });
+            const existing = document.getElementById('comparisonOverlay');
+            if (existing) existing.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'comparisonOverlay';
+            overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            const sign = (v) => v > 0 ? '+' : '';
+            const newItemsHtml = newNotOk.length ? `
+                <div class="mt-6">
+                    <p class="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">Novos itens NÃO OK</p>
+                    <ul class="list-disc pl-5 text-sm text-gray-900 dark:text-white">
+                        ${newNotOk.map(i => `<li>${i.section || ''} • ${i.name || ''}</li>`).join('')}
+                    </ul>
+                </div>
+            ` : '';
+            overlay.innerHTML = `
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-full max-w-2xl mx-4">
+                    <div class="flex items-start justify-between mb-4">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-900 dark:text-white">Comparação de lançamentos</h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">Frota ${inspection.frota || ''}</p>
+                        </div>
+                        <button onclick="document.getElementById('comparisonOverlay').remove()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                            <p class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1">Atual</p>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">${formatDateBR(inspection.data)}</p>
+                            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Percentual</p>
+                            <p class="text-xl font-semibold text-gray-900 dark:text-white">${currPercent}%</p>
+                            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Itens NÃO OK</p>
+                            <p class="text-xl font-semibold text-red-600 dark:text-red-400">${currNotOk}</p>
+                        </div>
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                            <p class="text-xs uppercase text-gray-500 dark:text-gray-400 mb-1">Anterior</p>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">${formatDateBR(previous.data)}</p>
+                            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Percentual</p>
+                            <p class="text-xl font-semibold text-gray-900 dark:text-white">${prevPercent}%</p>
+                            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Itens NÃO OK</p>
+                            <p class="text-xl font-semibold text-red-600 dark:text-red-400">${prevNotOk}</p>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <p class="text-sm font-medium text-gray-900 dark:text-white">Evolução</p>
+                        <p class="text-sm text-gray-800 dark:text-gray-100 mt-1">
+                            Percentual: <span class="${diffPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">${sign(diffPercent)}${diffPercent}%</span>
+                            • Itens NÃO OK: <span class="${diffNotOk <= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">${sign(diffNotOk)}${diffNotOk}</span>
+                        </p>
+                    </div>
+                    ${newItemsHtml}
+                    <div class="mt-6 flex justify-end">
+                        <button onclick="document.getElementById('comparisonOverlay').remove()" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark text-sm font-medium">Fechar</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
         }
 
         function viewInspection(id) {
