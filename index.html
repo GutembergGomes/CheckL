@@ -5345,6 +5345,32 @@
             loadPendentes();
         }
 
+        async function getAllTimeInspectedFrotas() {
+            try {
+                if (!isOnline()) return null;
+                // Busca um histórico maior para identificar equipamentos que já foram inspecionados alguma vez
+                const { data: d1 } = await supabase
+                    .from('inspections')
+                    .select('frota')
+                    .order('created_at', { ascending: false })
+                    .limit(5000);
+                    
+                const { data: d2 } = await supabase
+                    .from('irrig_inspections')
+                    .select('frota')
+                    .order('created_at', { ascending: false })
+                    .limit(5000);
+                
+                const set = new Set();
+                if (d1) d1.forEach(i => set.add(String(i.frota)));
+                if (d2) d2.forEach(i => set.add(String(i.frota)));
+                return set;
+            } catch (e) {
+                console.error('Erro ao buscar histórico completo:', e);
+                return null;
+            }
+        }
+
         async function loadPendentes() {
             const container = document.getElementById('pendentesContainer');
             if (!container) return;
@@ -5352,6 +5378,7 @@
             container.innerHTML = `
                 <div class="flex items-center justify-center py-12">
                     <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                    <span class="ml-3 text-gray-500">Carregando dados...</span>
                 </div>
             `;
 
@@ -5378,11 +5405,18 @@
                             .map(i => String(i.frota))
                     );
                 } else {
-                    inspectedFrotas = new Set(
-                        allInspections
-                            .filter(i => i.frota != null)
-                            .map(i => String(i.frota))
-                    );
+                    // Modo 'never': tenta buscar histórico completo no servidor
+                    const remoteSet = await getAllTimeInspectedFrotas();
+                    if (remoteSet) {
+                        inspectedFrotas = remoteSet;
+                    } else {
+                        // Fallback para cache local se offline ou erro
+                        inspectedFrotas = new Set(
+                            allInspections
+                                .filter(i => i.frota != null)
+                                .map(i => String(i.frota))
+                        );
+                    }
                 }
 
                 // Prepare combined equipments list
