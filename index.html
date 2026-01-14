@@ -5887,9 +5887,98 @@
             const dateInput = document.getElementById('dataInspecao');
             if (dateInput) {
                 dateInput.value = today;
-                dateInput.min = today;
-                dateInput.max = today;
-                dateInput.readOnly = true;
+                // Restrictions removed to allow past/future dates
+            }
+        }
+
+        async function loadAdminUsers() {
+            const list = document.getElementById('adminUsersList');
+            if (!list) return;
+            list.innerHTML = '<div class="text-center py-4"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div></div>';
+            
+            try {
+                // Try to fetch from 'users' table (legacy/synced)
+                let { data: users, error } = await supabase
+                    .from('users')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    console.warn('Error fetching users, trying usuarios view/table:', error);
+                    // Fallback to usuarios if users table issue
+                    const res = await supabase.from('usuarios').select('*').order('created_at', { ascending: false });
+                    users = res.data;
+                    error = res.error;
+                }
+
+                if (error) throw error;
+
+                if (!users || users.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-4">Nenhum usuário encontrado.</p>';
+                    return;
+                }
+
+                list.innerHTML = users.map(u => {
+                    const isApproved = u.approved === true || u.ativo === true; // Handle both schemas
+                    const isAdminUser = u.role === 'admin';
+                    return `
+                    <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <div>
+                            <p class="font-medium text-gray-900 dark:text-white">${u.email || u.name || 'Sem email'}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                ${u.name ? u.name + ' • ' : ''}
+                                ${new Date(u.created_at).toLocaleDateString()}
+                            </p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-1 text-xs rounded-full ${isApproved ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
+                                ${isApproved ? 'Aprovado' : 'Pendente'}
+                            </span>
+                            <button onclick="toggleUserApproval('${u.id || u.user_id}', ${!isApproved})" 
+                                class="px-3 py-1 text-sm ${isApproved ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'} rounded-md transition-colors">
+                                ${isApproved ? 'Revogar' : 'Aprovar'}
+                            </button>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error(e);
+                list.innerHTML = `<p class="text-red-500 text-sm">Erro ao carregar usuários: ${e.message}</p>`;
+            }
+        }
+
+        async function toggleUserApproval(id, newStatus) {
+            if (!confirm(`Deseja ${newStatus ? 'aprovar' : 'revogar'} o acesso deste usuário?`)) return;
+            
+            showLoading(true);
+            try {
+                // Update users table
+                const { error: err1 } = await supabase
+                    .from('users')
+                    .update({ approved: newStatus })
+                    .eq('id', id); // Try matching id first
+                
+                // Also try matching user_id just in case
+                if (err1) {
+                     const { error: err2 } = await supabase
+                        .from('users')
+                        .update({ approved: newStatus })
+                        .eq('user_id', id);
+                }
+
+                // Update usuarios table
+                await supabase
+                    .from('usuarios')
+                    .update({ ativo: newStatus })
+                    .eq('id', id);
+
+                showFloatingNotification('success', `Usuário ${newStatus ? 'aprovado' : 'revogado'}!`);
+                loadAdminUsers();
+            } catch (e) {
+                showCustomAlert('Erro ao atualizar usuário: ' + e.message);
+            } finally {
+                showLoading(false);
             }
         }
 
@@ -5960,7 +6049,7 @@
                 updateDashboardStats();
             }
 
-            if (sectionId === 'admin') { renderAccessControls(); bindAdminActions(); }
+            if (sectionId === 'admin') { renderAccessControls(); bindAdminActions(); loadAdminUsers(); }
             if (sectionId === 'historico_pneus') { initHistoricoPneus(); }
 
             // Reset nova inspeção section
@@ -8180,6 +8269,12 @@
             if (adminBar) {
                 if (isAdmin()) { adminBar.classList.remove('hidden'); } else { adminBar.classList.add('hidden'); }
             }
+            
+            const adminBtn = document.getElementById('adminUsersBtn');
+            if (adminBtn) {
+                 if (isAdmin()) { adminBtn.classList.remove('hidden'); } else { adminBtn.classList.add('hidden'); }
+            }
+            
             showModal('inspectionModal');
         }
 
