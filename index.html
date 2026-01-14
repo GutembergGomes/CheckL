@@ -564,6 +564,9 @@
                         <button onclick="showSection('historico')" class="nav-btn border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 px-1 py-4 text-sm font-medium">
                             Histórico
                         </button>
+                        <button onclick="showSection('pendentes')" class="nav-btn border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 px-1 py-4 text-sm font-medium">
+                            Pendentes
+                        </button>
                         <button onclick="showSection('global-analytics')" class="nav-btn border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 px-1 py-4 text-sm font-medium">
                             Analytics
                         </button>
@@ -1819,6 +1822,17 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </section>
+
+            <!-- Pendentes Section -->
+            <section id="pendentes" class="section-content hidden">
+                <div class="mb-8">
+                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Equipamentos Pendentes (Hoje)</h2>
+                    <p class="text-gray-600 dark:text-gray-400">Equipamentos que ainda não possuem checklist realizado na data de hoje.</p>
+                </div>
+                <div id="pendentesContainer" class="space-y-8">
+                    <!-- Dynamic Content -->
                 </div>
             </section>
 
@@ -5297,6 +5311,168 @@
             }
         }
 
+        async function loadPendentes() {
+            const container = document.getElementById('pendentesContainer');
+            if (!container) return;
+            
+            container.innerHTML = `
+                <div class="flex items-center justify-center py-12">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                </div>
+            `;
+
+            try {
+                // Ensure equipments are loaded
+                if (!equipments || equipments.length === 0) {
+                    await loadEquipments();
+                }
+
+                // Get today's inspections
+                const today = new Date().toISOString().split('T')[0];
+                const allInspections = getAllInspectionsCombined();
+                
+                // Set of equipment IDs (frota) that have been inspected today
+                const inspectedFrotas = new Set(
+                    allInspections
+                        .filter(i => {
+                            const d = i.data instanceof Date ? i.data.toISOString() : i.data;
+                            return d && d.startsWith(today);
+                        })
+                        .map(i => String(i.frota))
+                );
+
+                // Prepare combined equipments list
+                const candidates = [...(equipments || [])];
+                if (Array.isArray(irrigEquipments)) {
+                    irrigEquipments.forEach(ie => {
+                        // Avoid duplicates by frota + type
+                        if (!candidates.some(c => c.frota === ie.frota && c.tipo === ie.tipo)) {
+                            candidates.push(ie);
+                        }
+                    });
+                }
+
+                // Filter active equipments not in inspectedFrotas
+                const pending = candidates.filter(e => 
+                    (e.status === 'ativo' || !e.status) && 
+                    !inspectedFrotas.has(String(e.frota))
+                );
+
+                if (pending.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                            <svg class="mx-auto h-12 w-12 text-green-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Tudo em dia!</h3>
+                            <p class="text-gray-500 dark:text-gray-400">Todos os equipamentos ativos foram inspecionados hoje.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Group by type
+                const grouped = {};
+                pending.forEach(e => {
+                    const type = e.tipo || 'Outros';
+                    if (!grouped[type]) grouped[type] = [];
+                    grouped[type].push(e);
+                });
+
+                // Render
+                const typeTitles = {
+                    caminhao: 'Caminhões',
+                    trator: 'Tratores',
+                    colhedora: 'Colhedoras',
+                    plantadora: 'Plantadoras',
+                    distribuidora: 'Distribuidoras',
+                    reboque: 'Reboques',
+                    transbordo: 'Transbordos',
+                    tortao: 'Tortão',
+                    cobridores: 'Cobridores',
+                    motobombas: 'Motobombas',
+                    hidroroll: 'Hidro Roll',
+                    tanques: 'Tanques',
+                    manutencao: 'Manutenção',
+                    cct_coque: 'CCT / Coque'
+                };
+
+                let html = '';
+                // Sort keys to have a consistent order
+                Object.keys(grouped).sort().forEach(type => {
+                    const title = typeTitles[type] || type.charAt(0).toUpperCase() + type.slice(1);
+                    const items = grouped[type].sort((a, b) => String(a.frota).localeCompare(String(b.frota)));
+                    
+                    html += `
+                        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                            <div class="px-6 py-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 flex justify-between items-center">
+                                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                    ${title}
+                                    <span class="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-200">
+                                        ${items.length}
+                                    </span>
+                                </h3>
+                            </div>
+                            <div class="p-6">
+                                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                                    ${items.map(item => `
+                                        <div class="flex flex-col p-3 rounded-lg border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-750 hover:shadow-md transition-shadow">
+                                            <span class="text-lg font-bold text-gray-900 dark:text-white mb-1">${item.frota}</span>
+                                            ${item.descricao ? `<span class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${item.descricao}">${item.descricao}</span>` : ''}
+                                            <button onclick="startInspectionFromPending('${item.tipo}', '${item.frota}')" class="mt-3 text-xs font-medium text-primary hover:text-primary-dark flex items-center gap-1">
+                                                Iniciar
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                            </button>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('Error loading pending:', error);
+                container.innerHTML = `
+                    <div class="p-4 bg-red-100 text-red-700 rounded-lg">
+                        Erro ao carregar pendências. Tente novamente.
+                    </div>
+                `;
+            }
+        }
+        
+        function startInspectionFromPending(type, frota) {
+             if (['motobombas', 'hidroroll', 'tanques', 'irrigacao_tanques'].includes(type)) {
+                 const mappedType = type === 'irrigacao_tanques' ? 'tanques' : type;
+                 showSection('irrigacao');
+                 showIrrSubsection('inicio');
+                 
+                 selectIrrEquipment(mappedType);
+                 setTimeout(() => {
+                     const sel = document.getElementById('irrFrotaSelect');
+                     if (sel) {
+                         sel.value = frota;
+                         sel.dispatchEvent(new Event('change'));
+                     }
+                 }, 300);
+                 
+             } else {
+                 showSection('cct_coque');
+                 showCCTSubsection('inicio');
+                 
+                 selectEquipment(type);
+                 setTimeout(() => {
+                     const sel = document.getElementById('frotaSelect');
+                     if (sel) {
+                         sel.value = frota;
+                         sel.dispatchEvent(new Event('change'));
+                     }
+                 }, 300);
+             }
+        }
+
         // Mostrar/ocultar loading
         function showLoading(show) {
             const overlay = document.getElementById('loadingOverlay');
@@ -5989,7 +6165,7 @@
         }
 
         function showSection(sectionId) {
-            if (['historico','global-analytics','relatorios','equipamentos'].includes(sectionId)) {
+            if (['historico','global-analytics','relatorios','equipamentos', 'pendentes'].includes(sectionId)) {
                 viewMode = 'global';
                 dehydrateCCTSubsections();
             }
@@ -6074,6 +6250,9 @@
             }
             if (sectionId === 'equipamentos') {
                 populateEquipmentList();
+            }
+            if (sectionId === 'pendentes') {
+                loadPendentes();
             }
             if (sectionId === 'calibragem') {
                 initCalibragemForm();
@@ -6842,9 +7021,36 @@
             const sel = document.getElementById('irrFrotaSelect');
             if (!sel) return;
             while (sel.options.length > 2) sel.remove(2);
+            
+            const type = irrCurrentInspection ? irrCurrentInspection.tipo : null;
+            const aliases = typeof typeAliases === 'function' && type ? typeAliases(type) : (type ? [type] : []);
+            
+            const map = new Map();
+            
+            // 1. From irrigEquipments
             irrigEquipments.filter(e => e.status !== 'inativo').forEach(e => {
-                const o = document.createElement('option'); o.value = e.frota; o.textContent = e.frota; sel.appendChild(o);
+                if (!type || e.tipo === type || aliases.includes(e.tipo)) {
+                    map.set(e.frota, e);
+                }
             });
+            
+            // 2. From equipments
+            if (Array.isArray(equipments)) {
+                equipments.filter(e => (e.status || 'ativo') === 'ativo').forEach(e => {
+                    if (!type || e.tipo === type || aliases.includes(e.tipo)) {
+                        map.set(e.frota, e);
+                    }
+                });
+            }
+            
+            Array.from(map.values())
+                .sort((a,b) => String(a.frota).localeCompare(String(b.frota)))
+                .forEach(e => {
+                    const o = document.createElement('option'); 
+                    o.value = e.frota; 
+                    o.textContent = e.frota + (e.descricao ? ' - ' + e.descricao : ''); 
+                    sel.appendChild(o);
+                });
         }
 
         function irrBindFrotaSelect() {
