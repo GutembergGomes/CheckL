@@ -1764,7 +1764,7 @@
 
                 <!-- Filters -->
                 <div class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 mb-6">
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tipo de Equipamento</label>
                             <select id="filtroTipo" class="w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
@@ -1786,6 +1786,13 @@
                         <div>
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Data Final</label>
                             <input type="date" id="filtroDataFinal" class="w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Ordem</label>
+                            <select id="filtroOrdem" class="w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                <option value="desc">Mais recentes primeiro</option>
+                                <option value="asc">Mais antigos primeiro</option>
+                            </select>
                         </div>
                         <div class="flex items-end">
                             <button onclick="filterHistory()" class="w-full px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-dark transition-colors duration-200">
@@ -8289,6 +8296,8 @@
             const tipo = document.getElementById('filtroTipo').value;
             const di = document.getElementById('filtroDataInicial').value;
             const df = document.getElementById('filtroDataFinal').value;
+            const ordemEl = document.getElementById('filtroOrdem');
+            const ordem = ordemEl ? ordemEl.value : 'desc';
             const diTime = di ? dateOnlyToLocalDate(di).getTime() : null;
             const dfTime = df ? dateOnlyToLocalDate(df).getTime() : null;
             const all = viewMode === 'cct' ? inspections.slice() : (viewMode === 'irr' ? (Array.isArray(irrigInspections) ? irrigInspections.slice() : []) : getAllInspectionsCombined());
@@ -8298,6 +8307,11 @@
                 const afterStart = diTime == null || t >= diTime;
                 const beforeEnd = dfTime == null || t <= dfTime;
                 return matchesTipo && afterStart && beforeEnd;
+            }).sort((a, b) => {
+                const ta = dateOnlyToLocalDate(a.data).getTime();
+                const tb = dateOnlyToLocalDate(b.data).getTime();
+                if (ordem === 'desc') return tb - ta;
+                return ta - tb;
             });
             updateHistoryTable(filtered);
         }
