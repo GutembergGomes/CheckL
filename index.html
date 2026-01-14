@@ -7699,6 +7699,11 @@
             try {
                 const bind = (id, evt='input') => { const el = document.getElementById(id); if (el && !el._draftBound) { el.addEventListener(evt, saveCCTDraft); el._draftBound = true; } };
                 bind('dataInspecao','change'); bind('mecanico'); bind('observacao'); bind('reformaStatus','change'); bind('frotaSelect','change'); bind('frotaCustom');
+                const refEl = document.getElementById('reformaStatus');
+                if (refEl && !refEl._reformaBound) {
+                    refEl.addEventListener('change', applyReformaStatusToItems);
+                    refEl._reformaBound = true;
+                }
                 const raw = localStorage.getItem('cctDraft');
                 if (raw) {
                     const d = JSON.parse(raw);
@@ -7796,6 +7801,32 @@
                 index++;
                 });
             }
+        }
+
+        function applyReformaStatusToItems() {
+            try {
+                const refEl = document.getElementById('reformaStatus');
+                const isReforma = refEl && refEl.value === 'sim';
+                if (!Array.isArray(currentInspection.items)) return;
+                currentInspection.items.forEach(it => {
+                    const isStatusItem = typeof it.name === 'string' && it.name.indexOf('Status: Equipamento em reforma') !== -1;
+                    if (isStatusItem) return;
+                    if (isReforma) {
+                        it.status = 'notok';
+                        const radios = document.querySelectorAll(`input[name="item_${it.id}"]`);
+                        radios.forEach(r => {
+                            if (r.value === 'notok') {
+                                r.checked = true;
+                            } else {
+                                r.checked = false;
+                            }
+                        });
+                        const nb = document.getElementById('note_'+it.id);
+                        if (nb) nb.classList.remove('hidden');
+                    }
+                });
+                calculateResults();
+            } catch(_) {}
         }
 
         function saveCCTDraft() {
