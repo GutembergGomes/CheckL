@@ -1827,9 +1827,21 @@
 
             <!-- Pendentes Section -->
             <section id="pendentes" class="section-content hidden">
-                <div class="mb-8">
-                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Equipamentos Pendentes (Hoje)</h2>
-                    <p class="text-gray-600 dark:text-gray-400">Equipamentos que ainda não possuem checklist realizado na data de hoje.</p>
+                <div class="mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Equipamentos Pendentes</h2>
+                            <p class="text-gray-600 dark:text-gray-400">Visualize pendências de hoje ou equipamentos que nunca tiveram checklist lançado.</p>
+                        </div>
+                        <div class="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+                            <button id="pendentesModeHoje" type="button" onclick="setPendentesMode('today')" class="px-3 py-1.5 text-xs font-medium bg-primary text-white">
+                                Hoje
+                            </button>
+                            <button id="pendentesModeNunca" type="button" onclick="setPendentesMode('never')" class="px-3 py-1.5 text-xs font-medium bg-transparent text-gray-600 dark:text-gray-300">
+                                Nunca inspecionados
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div id="pendentesContainer" class="space-y-8">
                     <!-- Dynamic Content -->
@@ -5311,6 +5323,28 @@
             }
         }
 
+        let pendentesMode = 'today';
+
+        function setPendentesMode(mode) {
+            pendentesMode = mode === 'never' ? 'never' : 'today';
+            const btnHoje = document.getElementById('pendentesModeHoje');
+            const btnNunca = document.getElementById('pendentesModeNunca');
+            if (btnHoje && btnNunca) {
+                if (pendentesMode === 'today') {
+                    btnHoje.classList.add('bg-primary', 'text-white');
+                    btnHoje.classList.remove('bg-transparent', 'text-gray-600', 'dark:text-gray-300');
+                    btnNunca.classList.remove('bg-primary', 'text-white');
+                    btnNunca.classList.add('bg-transparent', 'text-gray-600', 'dark:text-gray-300');
+                } else {
+                    btnNunca.classList.add('bg-primary', 'text-white');
+                    btnNunca.classList.remove('bg-transparent', 'text-gray-600', 'dark:text-gray-300');
+                    btnHoje.classList.remove('bg-primary', 'text-white');
+                    btnHoje.classList.add('bg-transparent', 'text-gray-600', 'dark:text-gray-300');
+                }
+            }
+            loadPendentes();
+        }
+
         async function loadPendentes() {
             const container = document.getElementById('pendentesContainer');
             if (!container) return;
@@ -5327,19 +5361,29 @@
                     await loadEquipments();
                 }
 
-                // Get today's inspections
+                const mode = pendentesMode === 'never' ? 'never' : 'today';
+
+                // Get inspections
                 const today = new Date().toISOString().split('T')[0];
                 const allInspections = getAllInspectionsCombined();
                 
-                // Set of equipment IDs (frota) that have been inspected today
-                const inspectedFrotas = new Set(
-                    allInspections
-                        .filter(i => {
-                            const d = i.data instanceof Date ? i.data.toISOString() : i.data;
-                            return d && d.startsWith(today);
-                        })
-                        .map(i => String(i.frota))
-                );
+                let inspectedFrotas;
+                if (mode === 'today') {
+                    inspectedFrotas = new Set(
+                        allInspections
+                            .filter(i => {
+                                const d = i.data instanceof Date ? i.data.toISOString() : i.data;
+                                return d && d.startsWith(today);
+                            })
+                            .map(i => String(i.frota))
+                    );
+                } else {
+                    inspectedFrotas = new Set(
+                        allInspections
+                            .filter(i => i.frota != null)
+                            .map(i => String(i.frota))
+                    );
+                }
 
                 // Prepare combined equipments list
                 const candidates = [...(equipments || [])];
@@ -5359,13 +5403,16 @@
                 );
 
                 if (pending.length === 0) {
+                    const emptyMsg = mode === 'today'
+                        ? 'Todos os equipamentos ativos foram inspecionados hoje.'
+                        : 'Todos os equipamentos ativos já possuem pelo menos um checklist lançado.';
                     container.innerHTML = `
                         <div class="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
                             <svg class="mx-auto h-12 w-12 text-green-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                             </svg>
                             <h3 class="text-lg font-medium text-gray-900 dark:text-white">Tudo em dia!</h3>
-                            <p class="text-gray-500 dark:text-gray-400">Todos os equipamentos ativos foram inspecionados hoje.</p>
+                            <p class="text-gray-500 dark:text-gray-400">${emptyMsg}</p>
                         </div>
                     `;
                     return;
