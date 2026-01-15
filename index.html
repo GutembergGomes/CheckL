@@ -1233,7 +1233,8 @@
                     <div class="flex flex-wrap gap-3">
                         <button onclick="showCCTSubsection('inicio')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-primary text-primary">Início</button>
                         <button onclick="showCCTSubsection('plantio')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Plantio</button>
-                        <button onclick="showCCTSubsection('safra_transporte')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Safra / Transporte</button>
+                        <button onclick="showCCTSubsection('safra')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Safra</button>
+                        <button onclick="showCCTSubsection('transporte_soja')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Transporte de Soja</button>
                         <button onclick="showCCTSubsection('historico')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Histórico</button>
                         <button onclick="showCCTSubsection('analytics')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Analytics</button>
                         <button onclick="showCCTSubsection('relatorios')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Relatórios</button>
@@ -1241,7 +1242,8 @@
                     </div>
                 </div>
                 <div id="cct-sub-plantio" class="hidden"></div>
-                <div id="cct-sub-safra_transporte" class="hidden"></div>
+                <div id="cct-sub-safra" class="hidden"></div>
+                <div id="cct-sub-transporte_soja" class="hidden"></div>
                 <div id="cct-sub-historico" class="hidden"></div>
                 <div id="cct-sub-analytics" class="hidden"></div>
                 <div id="cct-sub-relatorios" class="hidden"></div>
@@ -6403,7 +6405,7 @@
                 const allow = getAllowedSubsectionsFor(email, 'cct_coque');
                 if (sub !== 'inicio' && allow.length && !allow.includes(sub)) { showCustomAlert('Acesso restrito.'); showCCTSubsection('inicio'); return; }
             }
-            document.querySelectorAll('#cct-sub-historico,#cct-sub-analytics,#cct-sub-relatorios,#cct-sub-equipamentos,#cct-sub-plantio,#cct-sub-safra_transporte').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('#cct-sub-historico,#cct-sub-analytics,#cct-sub-relatorios,#cct-sub-equipamentos,#cct-sub-plantio,#cct-sub-safra,#cct-sub-transporte_soja').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.cct-sub-btn').forEach(btn => {
                 btn.classList.remove('border-primary','text-primary');
                 btn.classList.add('border-transparent','text-gray-600');
@@ -6431,8 +6433,11 @@
             if (sub === 'plantio') {
                 renderCCTPlantio();
             }
-            if (sub === 'safra_transporte') {
-                renderCCTSafraTransporte();
+            if (sub === 'safra') {
+                renderCCTSafra();
+            }
+            if (sub === 'transporte_soja') {
+                renderCCTTransporteSoja();
             }
             if (sub === 'analytics') {
                 const sel = document.getElementById('chartPeriod');
@@ -6884,16 +6889,30 @@
             } catch(_) {}
         }
 
-        function renderCCTSafraTransporte() {
-            const container = document.getElementById('cct-sub-safra_transporte');
+        function renderCCTSafra() {
+            const container = document.getElementById('cct-sub-safra');
             if (!container) return;
             container.innerHTML = `
                 <div class="text-center py-12">
-                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    <svg class="mx-auto h-12 w-12 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7m-9 2v8m4-8v8m5-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">Safra / Transporte</h3>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Aguardando lista de equipamentos.</p>
+                    <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">Safra</h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Área reservada para controle da Safra. Aguardando definição dos equipamentos.</p>
+                </div>
+            `;
+        }
+
+        function renderCCTTransporteSoja() {
+            const container = document.getElementById('cct-sub-transporte_soja');
+            if (!container) return;
+            container.innerHTML = `
+                <div class="text-center py-12">
+                    <svg class="mx-auto h-12 w-12 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13l2-2h3l2-3h4l3 4 2 1v4H3v-4z" />
+                    </svg>
+                    <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">Transporte de Soja</h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Área reservada para o Transporte de Soja. Aguardando lista de caminhões/frotas.</p>
                 </div>
             `;
         }
