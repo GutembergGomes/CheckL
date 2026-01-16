@@ -6813,6 +6813,7 @@
                     <div class="p-4">
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">`;
                 
+                let cardsHtml = '';
                 group.items.forEach(item => {
                     const frota = (item.frota || '').toString();
                     const frente = item.frente ? item.frente.toString() : '';
@@ -6846,7 +6847,7 @@
                         }
                     }
                     
-                    html += `
+                    cardsHtml += `
                     <div class="cct-plantio-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
                         <div class="flex items-center gap-2 mb-1">
                             <span class="w-2 h-2 rounded-full ${statusDot}"></span>
@@ -6883,6 +6884,8 @@
                         <span class="text-[10px] opacity-75">${groupCount} equipamentos</span>
                     </div>`;
                 }
+                
+                html += cardsHtml;
                 
                 html += '</div></div></div>';
             });
@@ -7064,6 +7067,7 @@
                     <div class="p-4">
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">`;
                 
+                let cardsHtml = '';
                 group.items.forEach(item => {
                     const frota = (item.frota || '').toString();
                     const label = frota;
@@ -7096,7 +7100,7 @@
                         }
                     }
                     
-                    html += `
+                    cardsHtml += `
                     <div class="cct-apoio-plantio-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
                         <div class="flex items-center gap-2 mb-1">
                             <span class="w-2 h-2 rounded-full ${statusDot}"></span>
@@ -7133,6 +7137,8 @@
                         <span class="text-[10px] opacity-75">${groupCount} equipamentos</span>
                     </div>`;
                 }
+                
+                html += cardsHtml;
                 
                 html += '</div></div></div>';
             });
@@ -7350,6 +7356,7 @@
                     <div class="p-4">
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">`;
                 
+                let cardsHtml = '';
                 group.items.forEach(item => {
                     const frota = (item.frota || '').toString();
                     const frente = item.frente ? item.frente.toString() : '';
@@ -7383,7 +7390,7 @@
                         }
                     }
                     
-                    html += `
+                    cardsHtml += `
                     <div class="cct-transporte-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
                         <div class="flex items-center gap-2 mb-1">
                             <span class="w-2 h-2 rounded-full ${statusDot}"></span>
@@ -7420,6 +7427,8 @@
                         <span class="text-[10px] opacity-75">${groupCount} equipamentos</span>
                     </div>`;
                 }
+                
+                html += cardsHtml;
                 
                 html += '</div></div></div>';
             });
