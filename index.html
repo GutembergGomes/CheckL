@@ -1233,6 +1233,7 @@
                     <div class="flex flex-wrap gap-3">
                         <button onclick="showCCTSubsection('inicio')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-primary text-primary">Início</button>
                         <button onclick="showCCTSubsection('plantio')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Plantio</button>
+                        <button onclick="showCCTSubsection('apoio_plantio')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Apoio Plantio</button>
                         <button onclick="showCCTSubsection('safra')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Safra</button>
                         <button onclick="showCCTSubsection('transporte_soja')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Transporte de Soja</button>
                         <button onclick="showCCTSubsection('historico')" class="cct-sub-btn px-3 py-2 text-sm border-b-2 border-transparent text-gray-600 dark:text-gray-300">Histórico</button>
@@ -1242,6 +1243,7 @@
                     </div>
                 </div>
                 <div id="cct-sub-plantio" class="hidden"></div>
+                <div id="cct-sub-apoio_plantio" class="hidden"></div>
                 <div id="cct-sub-safra" class="hidden"></div>
                 <div id="cct-sub-transporte_soja" class="hidden"></div>
                 <div id="cct-sub-historico" class="hidden"></div>
@@ -1686,7 +1688,8 @@
                                             <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="analytics" class="form-checkbox"><span class="ml-2 text-sm">Analytics</span></label>
                                             <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="relatorios" class="form-checkbox"><span class="ml-2 text-sm">Relatórios</span></label>
                                             <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="equipamentos" class="form-checkbox"><span class="ml-2 text-sm">Equipamentos</span></label>
-                                            <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="plantio" class="form-checkbox"><span class="ml-2 text-sm">Plantio</span></label>
+                                            <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="plantio" class="form-checkbox"><span class="ml-2 text-sm">Plantio Entre Safra</span></label>
+                                            <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="apoio_plantio" class="form-checkbox"><span class="ml-2 text-sm">Apoio Plantio</span></label>
                                             <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="safra" class="form-checkbox"><span class="ml-2 text-sm">Safra</span></label>
                                             <label class="inline-flex items-center"><input type="checkbox" data-section="cct" value="transporte_soja" class="form-checkbox"><span class="ml-2 text-sm">Transporte de Soja</span></label>
                                         </div>
@@ -6408,7 +6411,7 @@
                 const allow = getAllowedSubsectionsFor(email, 'cct_coque');
                 if (sub !== 'inicio' && allow.length && !allow.includes(sub)) { showCustomAlert('Acesso restrito.'); showCCTSubsection('inicio'); return; }
             }
-            document.querySelectorAll('#cct-sub-historico,#cct-sub-analytics,#cct-sub-relatorios,#cct-sub-equipamentos,#cct-sub-plantio,#cct-sub-safra,#cct-sub-transporte_soja').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('#cct-sub-historico,#cct-sub-analytics,#cct-sub-relatorios,#cct-sub-equipamentos,#cct-sub-plantio,#cct-sub-apoio_plantio,#cct-sub-safra,#cct-sub-transporte_soja').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.cct-sub-btn').forEach(btn => {
                 btn.classList.remove('border-primary','text-primary');
                 btn.classList.add('border-transparent','text-gray-600');
@@ -6435,6 +6438,9 @@
             }
             if (sub === 'plantio') {
                 renderCCTPlantio();
+            }
+            if (sub === 'apoio_plantio') {
+                renderCCTApoioPlantio();
             }
             if (sub === 'safra') {
                 renderCCTSafra();
@@ -6565,98 +6571,7 @@
               { frota: "70032", frente: "4001" }
             ]
           },
-          {
-            type: "TANQUE DE 4000 L AGUA",
-            items: [
-              { frota: "3000", frente: "4002" }
-            ]
-          },
-          {
-            type: "RETRO ESCAVADEIRA",
-            items: [
-              { frota: "6104", frente: "4002" }
-            ]
-          },
-          {
-            type: "CAVALO PARA PRANCHA",
-            items: [
-              { frota: "6650", frente: "GERAIS" },
-              { frota: "6961", frente: "GERAIS" },
-              { frota: "?", frente: "GERAIS" }
-            ]
-          },
-          {
-            type: "PRANCHA",
-            items: [
-              { frota: "385", frente: "GERAIS" },
-              { frota: "570", frente: "GERAIS" },
-              { frota: "6666", frente: "GERAIS" }
-            ]
-          },
-          {
-            type: "PIPA",
-            items: [
-              { frota: "6278", frente: "4001" },
-              { frota: "6667", frente: "4001" },
-              { frota: "6976", frente: "4002" },
-              { frota: "6445", frente: "4002" }
-            ]
-          },
-          {
-            type: "PATROL",
-            items: [
-              { frota: "6165", frente: "GERAIS" },
-              { frota: "6664", frente: "GERAIS" }
-            ]
-          },
-          {
-            type: "PA CARREGADEIRA",
-            items: [
-              { frota: "6508", frente: "4002" }
-            ]
-          },
-          {
-            type: "TRATOR PARA O GUINCHO",
-            items: [
-              { frota: "6083", frente: "" }
-            ]
-          },
-          {
-            type: "GUINCHO TRAZEIRO",
-            items: [
-              { frota: "6030", frente: "" }
-            ]
-          },
-          {
-            type: "TRATOR PARA GPS",
-            items: [
-              { frota: "6365", frente: "GERAIS" }
-            ]
-          },
-          {
-            type: "TRATOR LÂMINA",
-            items: [
-              { frota: "6019", frente: "4002" }
-            ]
-          },
-          {
-            type: "LÂMINA STARA 5000",
-            items: [
-              { frota: "6553", frente: "4002" }
-            ]
-          },
-          {
-            type: "TRATOR GTS",
-            items: [
-              { frota: "6458", frente: "4001" }
-            ]
-          },
-          {
-            type: "LÂMINA GTS",
-            items: [
-              { frota: "6086", frente: "4001" }
-            ]
-          },
+
           {
             type: "TRATOR PARA COBRIÇÃO",
             items: [
@@ -6673,20 +6588,7 @@
               { frota: "6316", frente: "4002" }
             ]
           },
-          {
-            type: "CAVALO PARA TRANS. TORTA",
-            items: [
-              { frota: "6136", frente: "4002" },
-              { frota: "6137", frente: "4002" }
-            ]
-          },
-          {
-            type: "CAVALO PARA ATA",
-            items: [
-              { frota: "6700", frente: "4002" },
-              { frota: "6679", frente: "4002" }
-            ]
-          },
+
           {
             type: "CAMINHÃO TRANSBORDO",
             items: [
@@ -6696,37 +6598,12 @@
               { frota: "5467", frente: "4002" }
             ]
           },
+
           {
-            type: "CAMINHÃO MUNCK",
+            type: "AREA DE VIVÊNCIA muda",
             items: [
-              { frota: "146", frente: "4001" }
-            ]
-          },
-          {
-            type: "CAMINHÃO CAÇAMBA",
-            items: [
-              { frota: "6490", frente: "4002" },
-              { frota: "6252", frente: "4002" },
-              { frota: "6254", frente: "4002" }
-            ]
-          },
-          {
-            type: "CAÇAMBA 03 EIXOS",
-            items: [
-              { frota: "CAÇAMBA 03 EIXOS", frente: "" }
-            ]
-          },
-          {
-            type: "CAAMBA 03 EIXOS",
-            items: [
-              { frota: "CAAMBA 03 EIXOS", frente: "" }
-            ]
-          },
-          {
-            type: "ATA",
-            items: [
-              { frota: "30014", frente: "4002" },
-              { frota: "30015", frente: "4002" }
+              { frota: "6338", frente: "4001" },
+              { frota: "6684", frente: "4002" }
             ]
           },
           {
@@ -6734,13 +6611,6 @@
             items: [
               { frota: "423", frente: "4001" },
               { frota: "6600", frente: "4002" }
-            ]
-          },
-          {
-            type: "AREA DE VIVÊNCIA muda",
-            items: [
-              { frota: "6338", frente: "4001" },
-              { frota: "6684", frente: "4002" }
             ]
           }
         ];
@@ -6882,6 +6752,228 @@
             html += '</div>';
             container.innerHTML = html;
             const cards = container.querySelectorAll('.cct-plantio-card');
+            cards.forEach(card => {
+                card.addEventListener('click', function() {
+                    const frota = this.getAttribute('data-frota');
+                    const label = this.getAttribute('data-label') || '';
+                    if (frota) showCCTPlantioResumo(frota, label);
+                });
+            });
+        }
+
+        const cctApoioPlantioData = [
+          {
+            type: "TANQUE DE 4000 L AGUA",
+            items: [
+              { frota: "3000", frente: "4002" }
+            ]
+          },
+          {
+            type: "RETRO ESCAVADEIRA",
+            items: [
+              { frota: "6104", frente: "4002" }
+            ]
+          },
+          {
+            type: "CAVALO PARA PRANCHA",
+            items: [
+              { frota: "6650", frente: "GERAIS" },
+              { frota: "6961", frente: "GERAIS" },
+              { frota: "?", frente: "GERAIS" }
+            ]
+          },
+          {
+            type: "PRANCHA",
+            items: [
+              { frota: "385", frente: "GERAIS" },
+              { frota: "570", frente: "GERAIS" },
+              { frota: "6666", frente: "GERAIS" }
+            ]
+          },
+          {
+            type: "PIPA",
+            items: [
+              { frota: "6278", frente: "4001" },
+              { frota: "6667", frente: "4001" },
+              { frota: "6976", frente: "4002" },
+              { frota: "6445", frente: "4002" }
+            ]
+          },
+          {
+            type: "PATROL",
+            items: [
+              { frota: "6165", frente: "GERAIS" },
+              { frota: "6664", frente: "GERAIS" }
+            ]
+          },
+          {
+            type: "PA CARREGADEIRA",
+            items: [
+              { frota: "6508", frente: "4002" }
+            ]
+          },
+          {
+            type: "TRATOR PARA O GUINCHO",
+            items: [
+              { frota: "6083", frente: "" }
+            ]
+          },
+          {
+            type: "GUINCHO TRAZEIRO",
+            items: [
+              { frota: "6030", frente: "" }
+            ]
+          },
+          {
+            type: "TRATOR PARA GPS",
+            items: [
+              { frota: "6365", frente: "GERAIS" }
+            ]
+          },
+          {
+            type: "TRATOR LÂMINA",
+            items: [
+              { frota: "6019", frente: "4002" }
+            ]
+          },
+          {
+            type: "LÂMINA STARA 5000",
+            items: [
+              { frota: "6553", frente: "4002" }
+            ]
+          },
+          {
+            type: "TRATOR GTS",
+            items: [
+              { frota: "6458", frente: "4001" }
+            ]
+          },
+          {
+            type: "LÂMINA GTS",
+            items: [
+              { frota: "6086", frente: "4001" }
+            ]
+          },
+          {
+            type: "CAVALO PARA TRANS. TORTA",
+            items: [
+              { frota: "6136", frente: "4002" },
+              { frota: "6137", frente: "4002" }
+            ]
+          },
+          {
+            type: "CAVALO PARA ATA",
+            items: [
+              { frota: "6700", frente: "4002" },
+              { frota: "6679", frente: "4002" }
+            ]
+          },
+          {
+            type: "CAMINHÃO MUNCK",
+            items: [
+              { frota: "146", frente: "4001" }
+            ]
+          },
+          {
+            type: "CAMINHÃO CAÇAMBA",
+            items: [
+              { frota: "6490", frente: "4002" },
+              { frota: "6252", frente: "4002" },
+              { frota: "6254", frente: "4002" }
+            ]
+          },
+          {
+            type: "CAÇAMBA 03 EIXOS",
+            items: [
+              { frota: "CAÇAMBA 03 EIXOS", frente: "" }
+            ]
+          },
+          {
+            type: "CAAMBA 03 EIXOS",
+            items: [
+              { frota: "CAAMBA 03 EIXOS", frente: "" }
+            ]
+          },
+          {
+            type: "ATA",
+            items: [
+              { frota: "30014", frente: "4002" },
+              { frota: "30015", frente: "4002" }
+            ]
+          },
+
+
+      ];
+      function renderCCTApoioPlantio() {
+            const container = document.getElementById('cct-sub-apoio_plantio');
+            if (!container) return;
+            
+            const inspections = (JSON.parse(localStorage.getItem('inspections')) || []).filter(i => i.department === 'CCT');
+            
+            if (!cctApoioPlantioData.length) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-8">Nenhum equipamento cadastrado em Apoio Plantio.</div>';
+                return;
+            }
+
+            let html = '<div class="space-y-6">';
+            
+            cctApoioPlantioData.forEach(group => {
+                html += `
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div class="bg-gray-50 dark:bg-gray-700 px-4 py-3 border-b border-gray-200 dark:border-gray-600">
+                        <h3 class="text-sm font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide">${group.type}</h3>
+                    </div>
+                    <div class="p-4">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">`;
+                
+                group.items.forEach(item => {
+                    const frota = (item.frota || '').toString();
+                    const label = frota;
+                    const relevant = inspections.filter(i => {
+                        const f = (i.frota || '').toString();
+                        return f === frota;
+                    }).sort((a,b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+                    
+                    const last = relevant[0];
+                    let statusClass = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 border-gray-200 dark:border-gray-600';
+                    let statusLabel = 'Pendente';
+                    let statusDot = 'bg-gray-400';
+                    
+                    if (last) {
+                        const pct = last.results?.percentage || 0;
+                        if (pct >= 80) {
+                            statusClass = 'bg-green-50 text-green-900 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800';
+                            statusLabel = pct + '%';
+                            statusDot = 'bg-green-500';
+                        } else if (pct >= 60) {
+                            statusClass = 'bg-yellow-50 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800';
+                            statusLabel = pct + '%';
+                            statusDot = 'bg-yellow-500';
+                        } else {
+                            statusClass = 'bg-red-50 text-red-900 dark:bg-red-900/20 dark:text-red-300 border-red-200 dark:border-red-800';
+                            statusLabel = pct + '%';
+                            statusDot = 'bg-red-500';
+                        }
+                    }
+                    
+                    html += `
+                    <div class="cct-apoio-plantio-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="w-2 h-2 rounded-full ${statusDot}"></span>
+                            <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Status</span>
+                        </div>
+                        <span class="text-lg font-bold mb-1">${label}</span>
+                        <span class="text-sm font-medium mb-1">${statusLabel}</span>
+                        ${last ? `<span class="text-[10px] opacity-75">${formatDateBR(last.data)}</span>` : '<span class="text-[10px] opacity-50">-</span>'}
+                    </div>`;
+                });
+                
+                html += '</div></div></div>';
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+            const cards = container.querySelectorAll('.cct-apoio-plantio-card');
             cards.forEach(card => {
                 card.addEventListener('click', function() {
                     const frota = this.getAttribute('data-frota');
