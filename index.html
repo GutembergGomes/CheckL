@@ -6827,11 +6827,10 @@
                     let statusClass = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 border-gray-200 dark:border-gray-600';
                     let statusLabel = 'Pendente';
                     let statusDot = 'bg-gray-400';
+                    let pct = 0;
                     
                     if (last) {
-                        const pct = last.results?.percentage || 0;
-                        groupSum += pct;
-                        groupCount++;
+                        pct = last.results?.percentage || 0;
                         if (pct >= 80) {
                             statusClass = 'bg-green-50 text-green-900 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800';
                             statusLabel = pct + '%';
@@ -6846,6 +6845,9 @@
                             statusDot = 'bg-red-500';
                         }
                     }
+                    
+                    groupSum += pct;
+                    groupCount++;
                     
                     cardsHtml += `
                     <div class="cct-plantio-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
@@ -7080,11 +7082,10 @@
                     let statusClass = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 border-gray-200 dark:border-gray-600';
                     let statusLabel = 'Pendente';
                     let statusDot = 'bg-gray-400';
+                    let pct = 0;
                     
                     if (last) {
-                        const pct = last.results?.percentage || 0;
-                        groupSum += pct;
-                        groupCount++;
+                        pct = last.results?.percentage || 0;
                         if (pct >= 80) {
                             statusClass = 'bg-green-50 text-green-900 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800';
                             statusLabel = pct + '%';
@@ -7099,6 +7100,9 @@
                             statusDot = 'bg-red-500';
                         }
                     }
+                    
+                    groupSum += pct;
+                    groupCount++;
                     
                     cardsHtml += `
                     <div class="cct-apoio-plantio-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
@@ -7370,11 +7374,10 @@
                     let statusClass = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 border-gray-200 dark:border-gray-600';
                     let statusLabel = 'Pendente';
                     let statusDot = 'bg-gray-400';
+                    let pct = 0;
                     
                     if (last) {
-                        const pct = last.results?.percentage || 0;
-                        groupSum += pct;
-                        groupCount++;
+                        pct = last.results?.percentage || 0;
                         if (pct >= 80) {
                             statusClass = 'bg-green-50 text-green-900 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800';
                             statusLabel = pct + '%';
@@ -7389,6 +7392,9 @@
                             statusDot = 'bg-red-500';
                         }
                     }
+                    
+                    groupSum += pct;
+                    groupCount++;
                     
                     cardsHtml += `
                     <div class="cct-transporte-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
