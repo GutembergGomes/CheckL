@@ -6745,6 +6745,79 @@
           }
         ];
 
+        const cctTransporteSojaData = [
+          {
+            type: "CAMINHÕES - TRANSPORTE DE SOJA",
+            items: [
+              { frota: "6134" },
+              { frota: "6139" },
+              { frota: "6141" },
+              { frota: "6143" },
+              { frota: "6148" },
+              { frota: "6150" },
+              { frota: "6155" },
+              { frota: "6416" },
+              { frota: "6418" },
+              { frota: "6531" },
+              { frota: "6532" },
+              { frota: "6657" },
+              { frota: "6658" },
+              { frota: "6680" },
+              { frota: "6697" },
+              { frota: "6698" },
+              { frota: "6699" },
+              { frota: "6963" },
+              { frota: "6964" },
+              { frota: "6965" }
+            ]
+          },
+          {
+            type: "REBOQUES - GRUPO 2",
+            items: [
+              { frota: "4371" },
+              { frota: "4373" },
+              { frota: "4377" },
+              { frota: "6181" },
+              { frota: "6182" },
+              { frota: "6183" },
+              { frota: "6184" },
+              { frota: "6185" },
+              { frota: "6186" },
+              { frota: "6187" },
+              { frota: "6188" },
+              { frota: "6190" },
+              { frota: "6191" },
+              { frota: "6193" },
+              { frota: "6194" },
+              { frota: "6195" },
+              { frota: "6196" },
+              { frota: "6197" },
+              { frota: "6198" },
+              { frota: "6199" },
+              { frota: "6201" },
+              { frota: "6202" },
+              { frota: "6207" },
+              { frota: "6209" },
+              { frota: "6210" },
+              { frota: "6213" },
+              { frota: "6214" },
+              { frota: "6218" },
+              { frota: "6221" },
+              { frota: "6222" },
+              { frota: "6224" },
+              { frota: "6225" },
+              { frota: "6226" },
+              { frota: "6239" },
+              { frota: "6241" },
+              { frota: "6242" },
+              { frota: "9492" },
+              { frota: "9501" },
+              { frota: "9542" },
+              { frota: "9546" }
+            ]
+          }
+        ];
+
         function renderCCTPlantio() {
             const container = document.getElementById('cct-sub-plantio');
             if (!container) return;
@@ -6763,7 +6836,7 @@
                 group.items.forEach(item => {
                     const frota = (item.frota || '').toString();
                     const frente = item.frente ? item.frente.toString() : '';
-                    const label = frente ? frota + ' ' + frente : frota;
+                    const label = frota;
                     const relevant = inspections.filter(i => {
                         const f = (i.frota || '').toString();
                         return f === frota;
@@ -6909,15 +6982,75 @@
         function renderCCTTransporteSoja() {
             const container = document.getElementById('cct-sub-transporte_soja');
             if (!container) return;
-            container.innerHTML = `
-                <div class="text-center py-12">
-                    <svg class="mx-auto h-12 w-12 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13l2-2h3l2-3h4l3 4 2 1v4H3v-4z" />
-                    </svg>
-                    <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">Transporte de Soja</h3>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Área reservada para o Transporte de Soja. Aguardando lista de caminhões/frotas.</p>
-                </div>
-            `;
+            
+            let html = '<div class="space-y-6 mt-4">';
+            
+            cctTransporteSojaData.forEach(group => {
+                html += `
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden border border-gray-200 dark:border-gray-700">
+                    <div class="bg-gray-50 dark:bg-gray-700 px-4 py-3 border-b border-gray-200 dark:border-gray-600">
+                        <h3 class="text-sm font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wide">${group.type}</h3>
+                    </div>
+                    <div class="p-4">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">`;
+                
+                group.items.forEach(item => {
+                    const frota = (item.frota || '').toString();
+                    const frente = item.frente ? item.frente.toString() : '';
+                    const label = frente ? frota + ' ' + frente : frota;
+                    const relevant = inspections.filter(i => {
+                        const f = (i.frota || '').toString();
+                        return f === frota;
+                    }).sort((a,b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+                    
+                    const last = relevant[0];
+                    let statusClass = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 border-gray-200 dark:border-gray-600';
+                    let statusLabel = 'Pendente';
+                    let statusDot = 'bg-gray-400';
+                    
+                    if (last) {
+                        const pct = last.results?.percentage || 0;
+                        if (pct >= 80) {
+                            statusClass = 'bg-green-50 text-green-900 dark:bg-green-900/20 dark:text-green-300 border-green-200 dark:border-green-800';
+                            statusLabel = pct + '%';
+                            statusDot = 'bg-green-500';
+                        } else if (pct >= 60) {
+                            statusClass = 'bg-yellow-50 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800';
+                            statusLabel = pct + '%';
+                            statusDot = 'bg-yellow-500';
+                        } else {
+                            statusClass = 'bg-red-50 text-red-900 dark:bg-red-900/20 dark:text-red-300 border-red-200 dark:border-red-800';
+                            statusLabel = pct + '%';
+                            statusDot = 'bg-red-500';
+                        }
+                    }
+                    
+                    html += `
+                    <div class="cct-transporte-card flex flex-col items-center justify-center p-3 rounded-lg border ${statusClass} transition-all hover:shadow-md cursor-pointer" data-frota="${frota}" data-label="${label}">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="w-2 h-2 rounded-full ${statusDot}"></span>
+                            <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Status</span>
+                        </div>
+                        <span class="text-lg font-bold mb-1">${label}</span>
+                        <span class="text-sm font-medium mb-1">${statusLabel}</span>
+                        ${last ? `<span class="text-[10px] opacity-75">${formatDateBR(last.data)}</span>` : '<span class="text-[10px] opacity-50">-</span>'}
+                    </div>`;
+                });
+                
+                html += '</div></div></div>';
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+            
+            const cards = container.querySelectorAll('.cct-transporte-card');
+            cards.forEach(card => {
+                card.addEventListener('click', function() {
+                    const frota = this.getAttribute('data-frota');
+                    const label = this.getAttribute('data-label') || '';
+                    if (frota) showCCTPlantioResumo(frota, label);
+                });
+            });
         }
 
         function ensureCCTFilters(area) {
