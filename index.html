@@ -3288,8 +3288,29 @@
         function getCachedUser() { try { return JSON.parse(localStorage.getItem('currentUser')); } catch(_) { return null; } }
         function setCachedUser(u) { try { localStorage.setItem('currentUser', JSON.stringify(u)); } catch(_) {} }
         function clearCachedUser() { try { localStorage.removeItem('currentUser'); } catch(_) {} }
-        function getCachedInspections() { try { return JSON.parse(localStorage.getItem('cachedInspections')) || []; } catch(_) { return []; } }
-        function setCachedInspections(list) { try { localStorage.setItem('cachedInspections', JSON.stringify(list)); } catch(_) {} }
+        function getCachedInspections() {
+            try {
+                const primary = localStorage.getItem('cachedInspections');
+                if (primary) return JSON.parse(primary) || [];
+                const legacy = localStorage.getItem('inspections');
+                if (legacy) return JSON.parse(legacy) || [];
+                return [];
+            } catch(_) {
+                try {
+                    const legacy = localStorage.getItem('inspections');
+                    return legacy ? JSON.parse(legacy) || [] : [];
+                } catch(_) {
+                    return [];
+                }
+            }
+        }
+        function setCachedInspections(list) {
+            try {
+                const payload = JSON.stringify(list || []);
+                localStorage.setItem('cachedInspections', payload);
+                localStorage.setItem('inspections', payload);
+            } catch(_) {}
+        }
         function getPendingInspections() { try { return JSON.parse(localStorage.getItem('pendingInspections')) || []; } catch(_) { return []; } }
         function setPendingInspections(list) { try { localStorage.setItem('pendingInspections', JSON.stringify(list)); } catch(_) {} }
         function queueInspection(item) { const q = getPendingInspections(); q.push(item); setPendingInspections(q); }
@@ -5079,14 +5100,75 @@
         const pmCancelBtn = document.getElementById('pmCancel');
         if (pmCancelBtn) { pmCancelBtn.addEventListener('click', function() { document.getElementById('profileModal').classList.add('hidden'); }); }
 
+        // Smart Sync Helper
+        async function smartSync(tableName, currentData, idField = 'id', dateField = 'created_at', select = '*') {
+            if (!isOnline()) return currentData || [];
+            
+            // Find latest date in local data
+            let maxDate = new Date(0);
+            const currentMap = new Map();
+            
+            if (currentData && Array.isArray(currentData)) {
+                currentData.forEach(item => {
+                    if (item[idField]) currentMap.set(String(item[idField]), item);
+                    const d = new Date(item[dateField] || 0);
+                    if (d > maxDate) maxDate = d;
+                });
+            }
+            
+            // Add 1ms to avoid fetching the same record
+            const isoDate = new Date(maxDate.getTime() + 1).toISOString();
+            
+            try {
+                // First check count of new items to avoid heavy fetch if possible, 
+                // but simpler to just fetch with limit
+                const { data, error } = await supabase
+                    .from(tableName)
+                    .select(select)
+                    .gt(dateField, isoDate)
+                    .order(dateField, { ascending: true })
+                    .limit(1000); 
+
+                if (error) {
+                    console.error(`Smart sync error for ${tableName}:`, error);
+                    // If error (e.g. column not found), fall back to fetching latest
+                    return currentData || [];
+                }
+                
+                if (data && data.length > 0) {
+                    console.log(`Synced ${data.length} new items for ${tableName}`);
+                    data.forEach(item => {
+                        currentMap.set(String(item[idField]), item);
+                    });
+                }
+                
+                // Convert back to array and sort
+                return Array.from(currentMap.values()).sort((a,b) => new Date(b[dateField]) - new Date(a[dateField]));
+            } catch (err) {
+                console.error(`Smart sync exception for ${tableName}:`, err);
+                return currentData || [];
+            }
+        }
+
         // Carregar dados iniciais
         async function loadInitialData() {
             showLoading(true);
+            let hadCache = false;
+            let syncNotifId = null;
+            let totalSteps = 0;
+            let doneSteps = 0;
+            const updateStep = (label) => {
+                if (!syncNotifId || !totalSteps) return;
+                doneSteps = Math.min(doneSteps + 1, totalSteps);
+                const pct = Math.round((doneSteps / totalSteps) * 100);
+                updateFloatingNotification(syncNotifId, `${label} - ${pct}% concluído`);
+            };
             try {
                 // Hidratar imediatamente com cache para acelerar a renderização
                 try {
                     const cached = dedupeInspections(getCachedInspections());
                     inspections = cached || [];
+                    hadCache = Array.isArray(cached) && cached.length > 0;
                     irrigInspections = dedupeInspections(getCachedIrrInspections());
                     notifications = getCachedNotifications();
                     updateNotificationBadge();
@@ -5094,36 +5176,63 @@
                     updateDashboardStats();
                     updateAnalytics();
                     setTimeout(initializeCharts, 250);
-                } catch(_) {}
+                    if (hadCache) {
+                        showFloatingNotification('info', 'Usando dados locais salvos (modo offline/cache).');
+                    }
+                } catch(_) {
+                    if (!hadCache) {
+                        showFloatingNotification('info', 'Carregando dados diretamente do banco de dados (sem cache local).');
+                    }
+                }
 
-                // Buscar online em paralelo e substituir cache quando disponível
+                if (hadCache) {
+                    // Se já temos dados locais, liberamos a tela e sincronizamos em segundo plano
+                    showLoading(false);
+                }
+
+                // Buscar online em paralelo e sincronizar apenas novidades
                 if (isOnline()) {
-                    const fetchIns = supabase
-                        .from('inspections')
-                        .select('id,data,tipo,frota,mecanico,observacao,items,results,created_at,local_id')
-                        .order('created_at', { ascending: false })
-                        .limit(300);
-                    const fetchIrr = supabase
-                        .from('irrig_inspections')
-                        .select('id,data,tipo,frota,mecanico,observacao,items,results,created_at,local_id')
-                        .order('created_at', { ascending: false })
-                        .limit(300);
-                    const [resp, respIrr] = await Promise.allSettled([fetchIns, fetchIrr]);
-                    if (resp.status === 'fulfilled' && !resp.value.error) {
-                        const data = dedupeInspections(resp.value.data || []);
-                        inspections = data || [];
-                        setCachedInspections(inspections);
-                    }
-                    if (respIrr.status === 'fulfilled' && !respIrr.value.error) {
-                        irrigInspections = dedupeInspections(respIrr.value.data || []);
-                        setCachedIrrInspections(irrigInspections);
-                    }
+                    totalSteps = 4;
+                    syncNotifId = showFloatingNotification('info', 'Baixando dados do banco e preparando cache local (0%)', 0);
+
+                    const p1 = smartSync('inspections', inspections, 'id', 'created_at', 'id,data,tipo,frota,mecanico,observacao,items,results,created_at,local_id')
+                        .then(res => {
+                            const synced = dedupeInspections(res);
+                            inspections = synced;
+                            setCachedInspections(inspections);
+                            const count = Array.isArray(synced) ? synced.length : 0;
+                            updateStep(`Inspeções CCT baixadas e salvas localmente (${count} registros)`);
+                            return inspections;
+                        })
+                        .catch(err => {
+                            console.error('Erro ao sincronizar inspeções CCT:', err);
+                            updateStep('Inspeções CCT com erro, usando dados locais');
+                            return inspections;
+                        });
+                    const p2 = smartSync('irrig_inspections', irrigInspections, 'id', 'created_at', 'id,data,tipo,frota,mecanico,observacao,items,results,created_at,local_id')
+                        .then(res => {
+                            const synced = dedupeInspections(res);
+                            irrigInspections = synced;
+                            setCachedIrrInspections(irrigInspections);
+                            const count = Array.isArray(synced) ? synced.length : 0;
+                            updateStep(`Inspeções Irrigação baixadas e salvas localmente (${count} registros)`);
+                            return irrigInspections;
+                        })
+                        .catch(err => {
+                            console.error('Erro ao sincronizar inspeções de irrigação:', err);
+                            updateStep('Inspeções Irrigação com erro, usando dados locais');
+                            return irrigInspections;
+                        });
+                    
+                    await Promise.all([p1, p2]);
+                    showFloatingNotification('success', 'Dados do banco de dados sincronizados. Exibindo informações mais recentes.');
                 } else {
                     showFloatingNotification('warning', 'Sem internet. Exibindo dados em cache.');
                 }
 
                 // Equipamentos e sementes em paralelo
                 await loadEquipments();
+                updateStep('Equipamentos carregados e cache de frotas atualizado');
                 await Promise.all([
                     seedTrucks(),
                     seedHarvesters(),
@@ -5135,6 +5244,7 @@
                     seedCobridores(),
                     seedTortao()
                 ].map(p => p.catch ? p : Promise.resolve()));
+                updateStep('Dados base de sementes e frotas preparados');
 
                 // Sincronizações pendentes em paralelo
                 await Promise.all([
@@ -5144,11 +5254,16 @@
                     syncPendingCalibragem(),
                     syncPendingControle3p()
                 ].map(p => p.catch ? p : Promise.resolve()));
+                updateStep('Sincronizações pendentes processadas');
 
                 updateStats();
                 updateDashboardStats();
                 updateAnalytics();
                 setTimeout(initializeCharts, 250);
+                if (syncNotifId && totalSteps) {
+                    updateFloatingNotification(syncNotifId, 'Carregamento concluído - 100% (dados locais atualizados).');
+                    setTimeout(() => { dismissFloatingNotification(syncNotifId); }, 2500);
+                }
             } catch (error) {
                 console.error('Erro ao carregar dados:', error);
                 showFloatingNotification('error', 'Erro ao carregar dados');
@@ -5636,18 +5751,11 @@
         async function loadEquipments() {
             let fetched = [];
             try {
+                fetched = getCachedEquipments() || [];
+                
                 if (isOnline()) {
-                    const resp = await supabase
-                        .from('equipments')
-                        .select('*')
-                        .order('created_at', { ascending: false });
-                    if (!resp.error) {
-                        fetched = resp.data || [];
-                    } else {
-                        fetched = getCachedEquipments() || [];
-                    }
-                } else {
-                    fetched = getCachedEquipments() || [];
+                    // Sincronizar apenas atualizações
+                    fetched = await smartSync('equipments', fetched, 'id', 'updated_at');
                 }
             } catch (_) {
                 fetched = getCachedEquipments() || [];
@@ -9892,11 +10000,27 @@
             
             container.appendChild(notification);
             
-            setTimeout(() => {
-                if (document.getElementById(notificationId)) {
-                    notification.remove();
-                }
-            }, duration);
+            const autoDuration = typeof duration === 'number' ? duration : 5000;
+            if (autoDuration > 0) {
+                setTimeout(() => {
+                    if (document.getElementById(notificationId)) {
+                        notification.remove();
+                    }
+                }, autoDuration);
+            }
+            return notificationId;
+        }
+
+        function updateFloatingNotification(id, message) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const p = el.querySelector('p');
+            if (p) p.textContent = message;
+        }
+
+        function dismissFloatingNotification(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
         }
 
         function pushNotification(type, title, message, link) {
@@ -11588,10 +11712,21 @@
 
         async function loadUsers() {
             try {
+                // Tentar carregar do cache primeiro para exibição imediata
+                try {
+                    const cached = localStorage.getItem('cached_users_list');
+                    if (cached) {
+                        usersList = JSON.parse(cached);
+                        renderAdminUsers();
+                    }
+                } catch(_) {}
+
                 if (isOnline()) {
                     let { data, error } = await supabase.from('users').select('*').order('created_at', { ascending: false });
                     if (!error) {
                         usersList = data || [];
+                        localStorage.setItem('cached_users_list', JSON.stringify(usersList));
+                        
                         const onlineCount = Object.keys(onlineUsers || {}).length;
                         if (isAdmin() && (!usersList.length || (onlineCount > usersList.length))) {
                             try {
