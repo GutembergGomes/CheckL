@@ -5489,8 +5489,8 @@
             try {
                 if (isOnline() && isAuthenticated) {
                     // Update user_id in payload if resolved differently by ensureUserRecord
-                    if (validUserId && validUserId !== dbInspection.user_id) {
-                        dbInspection.user_id = validUserId;
+                    if (validUserId && validUserId.id && validUserId.id !== dbInspection.user_id) {
+                        dbInspection.user_id = validUserId.id;
                     }
 
                     const { error } = await supabase
@@ -8080,6 +8080,9 @@
             const isMobile = window.innerWidth < 640;
             if (config && Array.isArray(config.sections)) {
                 config.sections.forEach(section => {
+                    const startIndex = index;
+                    const itemCount = Array.isArray(section.items) ? section.items.length : 0;
+
                     const sectionDiv = document.createElement('div');
                     sectionDiv.className = 'mb-6';
                     const secId = 'irr_section_'+index+'_'+Math.random().toString(36).slice(2);
@@ -8088,7 +8091,13 @@
                             <h5 class="text-sm font-semibold text-green-800 dark:text-green-200">${section.name}</h5>
                             <svg class="w-4 h-4 text-green-700 dark:text-green-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                         </button>
-                        <div id="${secId}" class="${isMobile ? 'hidden' : ''} space-y-2 mt-2"></div>
+                        <div id="${secId}" class="${isMobile ? 'hidden' : ''} space-y-2 mt-2">
+                             <div class="flex justify-end pt-2 px-1">
+                                <button type="button" onclick="markIrrSectionItemsOK(${startIndex}, ${itemCount})" class="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 px-3 py-1.5 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors font-medium">
+                                    Marcar todos OK
+                                </button>
+                            </div>
+                        </div>
                     `;
                     container.appendChild(sectionDiv);
                     const itemsWrap = sectionDiv.querySelector('#'+secId);
@@ -8128,6 +8137,31 @@
                         index++;
                     });
                 });
+            }
+        }
+
+        function markIrrSectionItemsOK(startIndex, count) {
+            for (let i = startIndex; i < startIndex + count; i++) {
+                const item = irrCurrentInspection.items[i];
+                if (item && item.id === i) {
+                    item.status = 'ok';
+                    // Update UI
+                    const radios = document.querySelectorAll(`input[name="irr_item_${i}"]`);
+                    radios.forEach(r => {
+                        if (r.value === 'ok') r.checked = true;
+                        else r.checked = false;
+                    });
+                    
+                    const nb = document.getElementById('irr_note_'+i);
+                    if (nb) {
+                         nb.classList.add('hidden');
+                         updateIrrItemNote(i, ''); 
+                         const noteArea = nb.querySelector('textarea');
+                         if(noteArea) noteArea.value = '';
+                    }
+                    
+                    updateIrrItemStatus(i, 'ok'); 
+                }
             }
         }
 
@@ -8929,6 +8963,9 @@
             currentPhotoSessionId = (crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
             if (config && Array.isArray(config.sections)) {
                 config.sections.forEach(section => {
+                    const startIndex = index;
+                    const itemCount = Array.isArray(section.items) ? section.items.length : 0;
+                    
                     const sectionDiv = document.createElement('div');
                     sectionDiv.className = 'mb-6';
                     const secId = `sectionItems_${sectionCount++}`;
@@ -8937,7 +8974,13 @@
                             <h5 class="text-sm font-semibold text-green-800 dark:text-green-200">${section.name}</h5>
                             <svg class="w-4 h-4 text-green-700 dark:text-green-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                         </button>
-                        <div id="${secId}" class="${isMobile ? 'hidden' : ''} space-y-2 mt-2"></div>
+                        <div id="${secId}" class="${isMobile ? 'hidden' : ''} space-y-2 mt-2">
+                            <div class="flex justify-end pt-2 px-1">
+                                <button type="button" onclick="markSectionItemsOK(${startIndex}, ${itemCount})" class="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 px-3 py-1.5 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors font-medium">
+                                    Marcar todos OK
+                                </button>
+                            </div>
+                        </div>
                     `;
                     container.appendChild(sectionDiv);
                     const itemsWrap = sectionDiv.querySelector(`#${secId}`);
@@ -8990,6 +9033,49 @@
                 itemsWrap.appendChild(secNoteDiv);
                 index++;
                 });
+            }
+        }
+
+        function markSectionItemsOK(startIndex, count) {
+            // Confirm is optional, but safer. User asked to "facilitate", so maybe skip confirm or make it simple.
+            // Let's keep it without confirm for speed as requested "para facilitar"
+            // if(!confirm('Marcar todos os itens desta seção como OK?')) return;
+            
+            for (let i = startIndex; i < startIndex + count; i++) {
+                // Ensure item exists in currentInspection
+                // Since currentInspection.items is a flat array pushed sequentially, indices should match.
+                // However, we must be careful if there are gaps or filtered items.
+                // In generateChecklistItems, we push sequentially.
+                // We need to find the item with id == i.
+                // Since we push {id: index...}, and index increments, item at index k has id k.
+                // BUT, let's look at how currentInspection.items is built.
+                // currentInspection.items.push(itemData); index++;
+                // So currentInspection.items[i] might NOT have id == i if something was skipped?
+                // No, index starts at 0 and increments 1 by 1. So array index matches item.id.
+                
+                const item = currentInspection.items[i];
+                if (item && item.id === i) {
+                    item.status = 'ok';
+                    // clear note? maybe.
+                    
+                    // Update UI
+                    const radios = document.querySelectorAll(`input[name="item_${i}"]`);
+                    radios.forEach(r => {
+                        if (r.value === 'ok') r.checked = true;
+                        else r.checked = false;
+                    });
+                    
+                    // Hide note box
+                    const nb = document.getElementById('note_'+i);
+                    if (nb) {
+                         nb.classList.add('hidden');
+                         updateItemNote(i, ''); // Clear note in model too
+                         const noteArea = nb.querySelector('textarea');
+                         if(noteArea) noteArea.value = '';
+                    }
+                    
+                    updateItemStatus(i, 'ok'); // This saves draft and calculates results
+                }
             }
         }
 
@@ -12279,6 +12365,8 @@
                     if (error) { showFloatingNotification('warning', 'Falha ao aprovar'); return; }
                     showFloatingNotification('success', 'Usuário aprovado');
                     loadUsers();
+                    // Invalidate cache to force refresh of approval status (useful if approving self)
+                    setCachedUserRecord(null);
                 } else {
                     showFloatingNotification('warning', 'Sem internet');
                 }
