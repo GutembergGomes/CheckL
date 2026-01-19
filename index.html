@@ -3257,8 +3257,8 @@
         // Se o seu limite gratuito expirou, crie um novo projeto em https://supabase.com
         // e substitua as chaves abaixo pelas do novo projeto.
         
-        const SUPABASE_URL = 'https://tsnwsfoztycvzhfcqrdr.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_r_b0LYGOBSjLqrmhGG2p7A_LWJJN0AD';
+        const SUPABASE_URL = 'https://zstcokbdhpweyoefbsol.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_6dFKQwhJvMQutan77IuX9Q_PBFtqC_g';
         
         const INSPECTION_PHOTOS_BUCKET = 'inspection-photos';
         // ==========================================
@@ -5102,6 +5102,12 @@
 
         // Smart Sync Helper
         async function smartSync(tableName, currentData, idField = 'id', dateField = 'created_at', select = '*') {
+            // FIX: If table is 'equipments' or 'users', verify if dateField exists. 
+            // Equipments might not have updated_at, fallback to created_at
+            if (tableName === 'equipments' && dateField === 'updated_at') {
+                dateField = 'created_at';
+            }
+
             if (!isOnline()) return currentData || [];
             
             // Find latest date in local data
@@ -5250,7 +5256,7 @@
                 await Promise.all([
                     syncPendingInspections(),
                     syncPendingIrrInspections(),
-                    syncPendingEquipments(),
+                    // syncPendingEquipments(), // Disabled to avoid updated_at error if column missing
                     syncPendingCalibragem(),
                     syncPendingControle3p()
                 ].map(p => p.catch ? p : Promise.resolve()));
@@ -5272,9 +5278,65 @@
             }
         }
 
+        function generateUUID() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Helper to ensure user exists in legacy 'users' table
+        async function ensureUserRecord() {
+            if (!isOnline()) return null;
+            const user = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : null;
+            if (!user || !user.id || user.id === 'offline') return null;
+
+            try {
+                // 1. Check if user exists by ID
+                const { data: existingById } = await supabase.from('users').select('id').eq('id', user.id).maybeSingle();
+                
+                if (existingById) {
+                    return existingById.id;
+                }
+                
+                // 2. Check if user exists by Email
+                const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', user.email).maybeSingle();
+                
+                if (existingByEmail) {
+                    // User exists with different ID -> Return that ID
+                    return existingByEmail.id;
+                } else {
+                    // 3. Insert new user
+                    const displayName = (typeof getDisplayName === 'function') ? getDisplayName(user) : (user.email || 'User');
+                    const { error: insertErr } = await supabase.from('users').upsert({
+                        id: user.id,
+                        email: user.email,
+                        name: displayName,
+                        role: 'tecnico',
+                        created_at: new Date().toISOString(),
+                        user_id: user.id
+                    }, { onConflict: 'id', ignoreDuplicates: true });
+                    
+                    if (insertErr && insertErr.code !== '23505' && insertErr.status !== 409) {
+                         // If insert failed (e.g. race condition), try fetch by email again
+                         const { data: retryByEmail } = await supabase.from('users').select('id').eq('email', user.email).maybeSingle();
+                         if (retryByEmail) return retryByEmail.id;
+                    }
+                    
+                    return user.id;
+                }
+            } catch (err) {
+                console.error('Error ensuring user record:', err);
+                return user.id; // Fallback to current ID
+            }
+        }
+
         // Salvar inspeção no Supabase
         async function saveInspection() {
-            await ensureUserRecord();
+            const validUserId = await ensureUserRecord();
             if (!isApprovedUser()) { showCustomAlert('Aguardando aprovação do administrador.'); return; }
             if (savingInspection) return;
             // Validação do formulário
@@ -5338,9 +5400,43 @@
             const saveBtns = Array.from(document.querySelectorAll('button[onclick="saveInspection()"]'));
             saveBtns.forEach(b => { b.disabled = true; });
 
-            const user = (typeof currentUser !== 'undefined' && currentUser) || getCachedUser() || getOfflineUser();
+            let user = (typeof currentUser !== 'undefined' && currentUser) || getCachedUser() || getOfflineUser();
+
+            // SANITIZATION FIX: Check if user.id is actually a JSON string of the user object or corrupted
+            if (user) {
+                // Case 1: user.id is a stringified JSON
+                if (typeof user.id === 'string' && user.id.trim().startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(user.id);
+                        if (parsed && parsed.id && typeof parsed.id === 'string' && !parsed.id.startsWith('{')) {
+                             user = { ...user, id: parsed.id };
+                             console.warn('Fixed corrupted user.id (was JSON string)');
+                             // Persist fix
+                             if (typeof currentUser !== 'undefined') currentUser.id = parsed.id;
+                             try { 
+                                 const stored = JSON.parse(localStorage.getItem('currentUser'));
+                                 if (stored) { stored.id = parsed.id; localStorage.setItem('currentUser', JSON.stringify(stored)); }
+                             } catch(_) {}
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse corrupted user.id', e);
+                    }
+                }
+                // Case 2: user.id is the object itself (if JS allows weak typing weirdness, though unlikely if strictly string)
+                // Case 3: Ensure user.id is a valid UUID-like string
+                if (user.id && typeof user.id === 'string' && user.id.length > 50) {
+                     // If it's still too long, it might be double stringified or just wrong.
+                     // Try to extract a UUID pattern
+                     const match = user.id.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+                     if (match) {
+                         user.id = match[0];
+                         console.warn('Extracted UUID from corrupted string');
+                     }
+                }
+            }
+
             const isAuthenticated = !!(user && user.id && user.id !== 'offline');
-            const localId = (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString());
+            const localId = generateUUID();
             const itemsForSave = Array.isArray(currentInspection.items)
                 ? currentInspection.items.map(it => {
                     const clone = Object.assign({}, it);
@@ -5348,6 +5444,30 @@
                     return clone;
                 })
                 : [];
+            // CRITICAL SANITIZATION: Final check on user.id right before usage
+            let finalUserId = user.id;
+            
+            // If it's still a JSON string, try to parse it AGAIN or fallback to regex
+            if (typeof finalUserId === 'string' && (finalUserId.trim().startsWith('{') || finalUserId.length > 50)) {
+                try {
+                    // Try parsing as JSON first
+                    if (finalUserId.trim().startsWith('{')) {
+                        const p = JSON.parse(finalUserId);
+                        if (p && p.id && typeof p.id === 'string' && !p.id.startsWith('{')) {
+                            finalUserId = p.id;
+                        }
+                    }
+                } catch(e) {}
+                
+                // If still long, use regex to find UUID
+                if (finalUserId.length > 36) {
+                    const match = finalUserId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+                    if (match) {
+                        finalUserId = match[0];
+                    }
+                }
+            }
+
             const inspection = {
                 data: data,
                 tipo: currentEquipment,
@@ -5356,7 +5476,7 @@
                 observacao: observacao,
                 items: itemsForSave,
                 results: currentInspection.results,
-                user_id: user.id,
+                user_id: finalUserId, // Use sanitised ID
                 created_at: new Date().toISOString(),
                 local_id: localId
             };
@@ -5368,41 +5488,30 @@
 
             try {
                 if (isOnline() && isAuthenticated) {
-                    // FIX: Ensure user exists in legacy 'users' table before inserting inspection
-                    try {
-                        if (user.id && user.id !== 'offline') {
-                            const { count } = await supabase.from('users').select('id', { count: 'exact', head: true }).eq('id', user.id);
-                            if (count === 0) {
-                                const displayName = (typeof getDisplayName === 'function') ? getDisplayName(user) : (user.email || 'User');
-                                await supabase.from('users').upsert({
-                                    id: user.id,
-                                    email: user.email,
-                                    name: displayName,
-                                    role: 'tecnico',
-                                    created_at: new Date().toISOString(),
-                                    user_id: user.id
-                                }, { onConflict: 'id' });
-                            }
-                        }
-                    } catch (legacyErr) {
-                        console.error('Legacy user sync error:', legacyErr);
+                    // Update user_id in payload if resolved differently by ensureUserRecord
+                    if (validUserId && validUserId !== dbInspection.user_id) {
+                        dbInspection.user_id = validUserId;
                     }
 
                     const { error } = await supabase
                         .from('inspections')
-                        .upsert([dbInspection], { onConflict: 'local_id' });
+                        .upsert([dbInspection], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
-                        const offlineItem = { ...inspection, offline: true };
-                        offlineItem.id = offlineItem.local_id;
-                        addOrReplaceInspection(offlineItem);
-                        queueInspection(offlineItem);
-                        
-                        updateStats();
-                        updateAnalytics();
-                        showFloatingNotification('warning', `Erro ao salvar online: ${error.message}. Salvo offline e será sincronizado.`);
-                        clearForm();
-                        backToSelection();
-                        return;
+                        if (error.code === '23505' || error.status === 409) {
+                            console.warn('Conflict ignored during saveInspection');
+                        } else {
+                            const offlineItem = { ...inspection, offline: true };
+                            offlineItem.id = offlineItem.local_id;
+                            addOrReplaceInspection(offlineItem);
+                            queueInspection(offlineItem);
+                            
+                            updateStats();
+                            updateAnalytics();
+                            showFloatingNotification('warning', `Erro ao salvar online: ${error.message}. Salvo offline e será sincronizado.`);
+                            clearForm();
+                            backToSelection();
+                            return;
+                        }
                     }
                     await loadInitialData();
                     showModal('successModal');
@@ -8251,9 +8360,15 @@
                 try {
                     const { data: upData, error } = await supabase
                         .from('irrig_inspections')
-                        .upsert([dbInspection], { onConflict: 'local_id' })
+                        .upsert([dbInspection], { onConflict: 'local_id', ignoreDuplicates: true })
                         .select();
-                    if (!error && upData && upData[0]) { record.id = upData[0].id; savedOnline = true; }
+                    if (!error && upData && upData[0]) { 
+                        record.id = upData[0].id; savedOnline = true; 
+                    } else if (error && (error.code === '23505' || error.status === 409)) {
+                        // Treat conflict as success (already saved)
+                        savedOnline = true;
+                        // We can optionally fetch the ID if needed, but local_id is enough for uniqueness
+                    }
                 } catch (_) {}
             }
             if (!savedOnline) { record.id = record.local_id; queueIrrInspection(dbInspection); }
@@ -9233,109 +9348,124 @@
         }
 
         function updateRecentInspections() {
-            const container = document.getElementById('inspecoesRecentes');
-            const all = viewMode === 'cct' ? inspections.slice() : (viewMode === 'irr' ? (Array.isArray(irrigInspections) ? irrigInspections.slice() : []) : getAllInspectionsCombined());
-            const recent = all.slice().sort((a,b) => {
-                const ta = new Date(a.created_at || a.data).getTime();
-                const tb = new Date(b.created_at || b.data).getTime();
-                return tb - ta;
-            }).slice(0, 5);
-            
-            if (recent.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center text-gray-500 dark:text-gray-400 py-8">
-                        <svg class="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                        </svg>
-                        <p class="mt-2">Nenhuma inspeção realizada ainda</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            container.innerHTML = recent.map(inspection => {
-                const statusColor = inspection.results.percentage >= 80 ? 'green' : 
-                                  inspection.results.percentage >= 60 ? 'yellow' : 'red';
+            try {
+                const container = document.getElementById('inspecoesRecentes');
+                if (!container) return;
                 
-                return `
-                    <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                        <div>
-                            <p class="font-medium text-gray-900 dark:text-white">${inspection.frota}</p>
-                            <p class="text-sm text-gray-500 dark:text-gray-400">${inspection.tipo.charAt(0).toUpperCase() + inspection.tipo.slice(1)} - ${formatDateBR(inspection.data)}</p>
+                const all = viewMode === 'cct' ? inspections.slice() : (viewMode === 'irr' ? (Array.isArray(irrigInspections) ? irrigInspections.slice() : []) : getAllInspectionsCombined());
+                const recent = all.slice().sort((a,b) => {
+                    const ta = new Date(a.created_at || a.data).getTime();
+                    const tb = new Date(b.created_at || b.data).getTime();
+                    return tb - ta;
+                }).slice(0, 5);
+                
+                if (recent.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center text-gray-500 dark:text-gray-400 py-8">
+                            <svg class="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                            <p class="mt-2">Nenhuma inspeção realizada ainda</p>
                         </div>
-                        <div class="text-right">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${statusColor}-100 text-${statusColor}-800 dark:bg-${statusColor}-900 dark:text-${statusColor}-200">
-                                ${inspection.results.percentage}%
-                            </span>
+                    `;
+                    return;
+                }
+                
+                container.innerHTML = recent.map(inspection => {
+                    const percent = inspection.results?.percentage ?? 0;
+                    const statusColor = percent >= 80 ? 'green' : 
+                                      percent >= 60 ? 'yellow' : 'red';
+                    const dataFmt = inspection.data ? formatDateBR(inspection.data) : '';
+                    
+                    return `
+                        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div>
+                                <p class="font-medium text-gray-900 dark:text-white">${inspection.frota || 'N/A'}</p>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">${(inspection.tipo || '').charAt(0).toUpperCase() + (inspection.tipo || '').slice(1)} - ${dataFmt}</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${statusColor}-100 text-${statusColor}-800 dark:bg-${statusColor}-900 dark:text-${statusColor}-200">
+                                    ${percent}%
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                `;
-            }).join('');
+                    `;
+                }).join('');
+            } catch (e) {
+                console.warn('Error in updateRecentInspections:', e);
+            }
         }
 
         function updateHistoryTable(list) {
-            if (!list) {
-                if (viewMode === 'cct') list = inspections.slice();
-                else if (viewMode === 'irr') list = (Array.isArray(irrigInspections) ? irrigInspections.slice() : []);
-                else list = getAllInspectionsCombined();
-            }
-            const tbody = document.getElementById('historyTableBody');
-            if (!list || list.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
-                            <svg class="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                            </svg>
-                            Nenhuma inspeção encontrada
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            const admin = isAdmin();
-            tbody.innerHTML = list.slice().reverse().map(inspection => {
-                const statusColor = inspection.results.percentage >= 80 ? 'green' : 
-                                  inspection.results.percentage >= 60 ? 'yellow' : 'red';
-                const statusText = inspection.results.percentage >= 80 ? 'Aprovado' : 
-                                 inspection.results.percentage >= 60 ? 'Atenção' : 'Reprovado';
-                const inspId = (inspection.id ?? inspection.local_id ?? '').toString();
-                const isPending = !!inspection.offline || (!inspection.id && !!inspection.local_id);
-                const stateBadge = isPending
-                    ? `<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 ml-2\">Pendente</span>`
-                    : `<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 ml-2\">Sincronizado</span>`;
-                const adminActions = admin ? `
-                    <button onclick=\"openEditInspection('${inspId}')\" class=\"ml-3 text-yellow-600 hover:text-yellow-700 text-sm font-medium\">Editar</button>
-                    <button onclick=\"deleteInspection('${inspId}')\" class=\"ml-3 text-red-600 hover:text-red-700 text-sm font-medium\">Excluir</button>
-                ` : '';
-                const compareAction = `
-                    <button onclick=\"compareInspections('${inspId}')\" class=\"ml-3 text-blue-600 hover:text-blue-700 text-sm font-medium\">Comparar</button>
-                `;
-                const actions = adminActions + compareAction;
+            try {
+                if (!list) {
+                    if (viewMode === 'cct') list = inspections.slice();
+                    else if (viewMode === 'irr') list = (Array.isArray(irrigInspections) ? irrigInspections.slice() : []);
+                    else list = getAllInspectionsCombined();
+                }
+                const tbody = document.getElementById('historyTableBody');
+                if (!tbody) return; // FIX: Added null check
                 
-                return `
-                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${formatDateBR(inspection.data)}</td>
-                        <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${inspection.tipo.charAt(0).toUpperCase() + inspection.tipo.slice(1)}</td>
-                        <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${inspection.frota}</td>
-                        <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${inspection.mecanico}</td>
-                        <td class="px-6 py-4">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${statusColor}-100 text-${statusColor}-800 dark:bg-${statusColor}-900 dark:text-${statusColor}-200">
-                                ${statusText}
-                            </span>
-                            ${stateBadge}
-                        </td>
-                        <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${inspection.results.percentage}%</td>
-                        <td class="px-6 py-4">
-                            <button onclick="viewInspection('${inspId}')" class="text-primary hover:text-primary-dark text-sm font-medium">
-                                Ver detalhes
-                            </button>
-                            ${actions}
-                        </td>
-                    </tr>
-                `;
-            }).join('');
+                if (!list || list.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                                <svg class="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                </svg>
+                                Nenhuma inspeção encontrada
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+                
+                const admin = isAdmin();
+                tbody.innerHTML = list.slice().reverse().map(inspection => {
+                    const percent = inspection.results?.percentage ?? 0;
+                    const statusColor = percent >= 80 ? 'green' : 
+                                      percent >= 60 ? 'yellow' : 'red';
+                    const statusText = percent >= 80 ? 'Aprovado' : 
+                                     percent >= 60 ? 'Atenção' : 'Reprovado';
+                    const inspId = (inspection.id ?? inspection.local_id ?? '').toString();
+                    const isPending = !!inspection.offline || (!inspection.id && !!inspection.local_id);
+                    const stateBadge = isPending
+                        ? `<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 ml-2\">Pendente</span>`
+                        : `<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 ml-2\">Sincronizado</span>`;
+                    const adminActions = admin ? `
+                        <button onclick=\"openEditInspection('${inspId}')\" class=\"ml-3 text-yellow-600 hover:text-yellow-700 text-sm font-medium\">Editar</button>
+                        <button onclick=\"deleteInspection('${inspId}')\" class=\"ml-3 text-red-600 hover:text-red-700 text-sm font-medium\">Excluir</button>
+                    ` : '';
+                    const compareAction = `
+                        <button onclick=\"compareInspections('${inspId}')\" class=\"ml-3 text-blue-600 hover:text-blue-700 text-sm font-medium\">Comparar</button>
+                    `;
+                    const actions = adminActions + compareAction;
+                    
+                    return `
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${formatDateBR(inspection.data)}</td>
+                            <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${(inspection.tipo || '').charAt(0).toUpperCase() + (inspection.tipo || '').slice(1)}</td>
+                            <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${inspection.frota || ''}</td>
+                            <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${inspection.mecanico || ''}</td>
+                            <td class="px-6 py-4">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-${statusColor}-100 text-${statusColor}-800 dark:bg-${statusColor}-900 dark:text-${statusColor}-200">
+                                    ${statusText}
+                                </span>
+                                ${stateBadge}
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-900 dark:text-white">${percent}%</td>
+                            <td class="px-6 py-4">
+                                <button onclick="viewInspection('${inspId}')" class="text-primary hover:text-primary-dark text-sm font-medium">
+                                    Ver detalhes
+                                </button>
+                                ${actions}
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.warn('Error in updateHistoryTable:', e);
+            }
         }
 
         function toggleMobileBar(show) {
@@ -9495,8 +9625,8 @@
                     if (isOnline() && (currentUser || getCachedUser())) {
                         const rec = irrigInspections[idxIrr];
                         const dbInspection = { data: rec.data, tipo: rec.tipo, frota: rec.frota, mecanico: rec.mecanico, observacao: rec.observacao, items: rec.items, results: rec.results, user_id: rec.user_id, created_at: rec.created_at, local_id: rec.local_id };
-                        const { error } = await supabase.from('irrig_inspections').upsert([dbInspection], { onConflict: 'local_id' });
-                        if (error) { queueIrrInspection(dbInspection); }
+                        const { error } = await supabase.from('irrig_inspections').upsert([dbInspection], { onConflict: 'local_id', ignoreDuplicates: true });
+                        if (error && error.code !== '23505' && error.status !== 409) { queueIrrInspection(dbInspection); }
                     }
                 } else {
                     const idx = inspections.findIndex(i => String(i.id) === id || String(i.local_id) === id);
@@ -10742,29 +10872,81 @@
                         : [];
 
                     // FIX: Ensure user exists in legacy 'users' table
-                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser && item.user_id === currentUser.id) {
+                    if (item.user_id && typeof item.user_id === 'string' && item.user_id.startsWith('{')) {
                         try {
-                            const { count } = await supabase.from('users').select('id', { count: 'exact', head: true }).eq('id', item.user_id);
-                            if (count === 0) {
-                                const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
-                                await supabase.from('users').upsert({
-                                    id: currentUser.id,
-                                    email: currentUser.email,
-                                    name: displayName,
-                                    role: 'tecnico',
-                                    created_at: new Date().toISOString(),
-                                    user_id: currentUser.id
-                                }, { onConflict: 'id' });
+                             const p = JSON.parse(item.user_id);
+                             if (p.id) item.user_id = p.id;
+                        } catch(_) {}
+                    }
+
+                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser) {
+                        // Relaxed check: if currentUser.id is corrupted, we rely on item.user_id being fixed above
+                        const currentIdClean = (currentUser.id && currentUser.id.startsWith('{')) ? (() => { try { return JSON.parse(currentUser.id).id; } catch { return currentUser.id; } })() : currentUser.id;
+                        
+                        if (item.user_id === currentIdClean) {
+                        try {
+                            // 1. Check if user exists by ID
+                            const { data: existingById } = await supabase.from('users').select('id').eq('id', item.user_id).maybeSingle();
+                            
+                            if (!existingById) {
+                                // 2. Check if user exists by Email
+                                const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
+                                
+                                if (existingByEmail) {
+                                    // User exists with different ID -> Use that ID
+                                    item.user_id = existingByEmail.id;
+                                } else {
+                                    // 3. Insert new user
+                                    const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
+                                    const { error: insertErr } = await supabase.from('users').upsert({
+                                        id: currentUser.id,
+                                        email: currentUser.email,
+                                        name: displayName,
+                                        role: 'tecnico',
+                                        created_at: new Date().toISOString(),
+                                        user_id: currentUser.id
+                                    }, { onConflict: 'id', ignoreDuplicates: true });
+
+                                    if (insertErr && insertErr.code !== '23505' && insertErr.status !== 409) {
+                                        const { data: retryByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
+                                        if (retryByEmail) item.user_id = retryByEmail.id;
+                                    }
+                                }
                             }
                         } catch (_) {}
                     }
+                }
 
                     const { error } = await supabase
                         .from('inspections')
-                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, items: cleanItems, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id' });
-                    if (error) { throw error; }
+                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, items: cleanItems, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id', ignoreDuplicates: true });
+                    
+                    if (error) {
+                        if (error.code === '23505' || error.status === 409) {
+                            console.warn('Sync conflict (already exists - ignored):', item.local_id);
+                        } else {
+                            throw error;
+                        }
+                    }
                     try { await supabase.from('system_events').insert([{ type:'new_inspection', title:'Nova inspeção', message: `${item.tipo||''} • ${item.frota||''} • ${item.mecanico||''}`, payload: { tipo: item.tipo||'', frota: item.frota||'', mecanico: item.mecanico||'', data: item.data||'', local_id: item.local_id||'', modulo: 'cct' } }]); } catch(_) {}
-                    try { systemBroadcastChannel && systemBroadcastChannel.send({ type:'broadcast', event:'new_inspection', payload: { modulo:'cct', tipo: item.tipo||'', frota: item.frota||'', mecanico: item.mecanico||'', data: item.data||'', local_id: item.local_id||'' } }); } catch(_) {}
+                    try { 
+                        if (systemBroadcastChannel) {
+                            await systemBroadcastChannel.send({ 
+                                type: 'broadcast', 
+                                event: 'new_inspection', 
+                                payload: { 
+                                    modulo: 'cct', 
+                                    tipo: item.tipo||'', 
+                                    frota: item.frota||'', 
+                                    mecanico: item.mecanico||'', 
+                                    data: item.data||'', 
+                                    local_id: item.local_id||'' 
+                                } 
+                            });
+                        }
+                    } catch(err) {
+                        console.warn('Broadcast error (ignored):', err);
+                    }
                 } catch (e) {
                     remaining.push(item);
                 }
@@ -10791,27 +10973,63 @@
                         : [];
 
                     // FIX: Ensure user exists in legacy 'users' table
-                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser && item.user_id === currentUser.id) {
+                    if (item.user_id && typeof item.user_id === 'string' && item.user_id.startsWith('{')) {
                         try {
-                            const { count } = await supabase.from('users').select('id', { count: 'exact', head: true }).eq('id', item.user_id);
-                            if (count === 0) {
-                                const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
-                                await supabase.from('users').upsert({
-                                    id: currentUser.id,
-                                    email: currentUser.email,
-                                    name: displayName,
-                                    role: 'tecnico',
-                                    created_at: new Date().toISOString(),
-                                    user_id: currentUser.id
-                                }, { onConflict: 'id' });
+                             const p = JSON.parse(item.user_id);
+                             if (p.id) item.user_id = p.id;
+                        } catch(_) {}
+                    }
+
+                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser) {
+                        // Relaxed check: if currentUser.id is corrupted, we rely on item.user_id being fixed above
+                        const currentIdClean = (currentUser.id && currentUser.id.startsWith('{')) ? (() => { try { return JSON.parse(currentUser.id).id; } catch { return currentUser.id; } })() : currentUser.id;
+                        
+                        if (item.user_id === currentIdClean) {
+                        try {
+                            // 1. Check if user exists by ID
+                            const { data: existingById } = await supabase.from('users').select('id').eq('id', item.user_id).maybeSingle();
+                            
+                            if (!existingById) {
+                                // 2. Check if user exists by Email
+                                const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
+                                
+                                if (existingByEmail) {
+                                    // User exists with different ID -> Use that ID
+                                    item.user_id = existingByEmail.id;
+                                } else {
+                                    // 3. Insert new user
+                                    const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
+                                    const { error: insertErr } = await supabase.from('users').upsert({
+                                        id: currentUser.id,
+                                        email: currentUser.email,
+                                        name: displayName,
+                                        role: 'tecnico',
+                                        created_at: new Date().toISOString(),
+                                        user_id: currentUser.id
+                                    }, { onConflict: 'id', ignoreDuplicates: true });
+
+                                    if (insertErr && insertErr.code !== '23505' && insertErr.status !== 409) {
+                                        const { data: retryByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
+                                        if (retryByEmail) item.user_id = retryByEmail.id;
+                                    }
+                                }
                             }
                         } catch (_) {}
                     }
+                }
 
                     const { error } = await supabase
                         .from('irrig_inspections')
-                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, observacao: item.observacao, items: cleanItems, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id' });
-                    if (error) throw error;
+                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, observacao: item.observacao, items: cleanItems, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id', ignoreDuplicates: true });
+                    
+                    if (error) {
+                        // Explicitly ignore 409/23505 even if ignoreDuplicates didn't catch it
+                        if (error.code === '23505' || error.status === 409) {
+                            console.warn('Sync conflict (already exists - ignored):', item.local_id);
+                        } else {
+                            throw error;
+                        }
+                    }
                 } catch (_) { remaining.push(item); }
             }
             setPendingIrrInspections(remaining);
@@ -11087,10 +11305,15 @@
                 const local_id = (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString());
                 const record = { local_id, created_at: new Date().toISOString(), user_id: user.id, ...data };
                 if (isOnline() && isAuthenticated) {
-                    const { error } = await supabase.from('calibragem').upsert([record], { onConflict: 'local_id' });
+                    const { error } = await supabase.from('calibragem').upsert([record], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
-                        queueCalibragem({ ...record, offline: true });
-                        showFloatingNotification('warning', 'Falha ao salvar online. Salvo offline e será sincronizado.');
+                        if (error.code === '23505' || error.status === 409) {
+                            showFloatingNotification('success', 'Calibragem salva (sincronizada).');
+                            clearCalibragemForm();
+                        } else {
+                            queueCalibragem({ ...record, offline: true });
+                            showFloatingNotification('warning', 'Falha ao salvar online. Salvo offline e será sincronizado.');
+                        }
                     } else {
                         showFloatingNotification('success', 'Calibragem salva.');
                         clearCalibragemForm();
@@ -11129,8 +11352,14 @@
             const remaining = [];
             for (const item of queue) {
                 try {
-                    const { error } = await supabase.from('calibragem').upsert([item], { onConflict: 'local_id' });
-                    if (error) throw error;
+                    const { error } = await supabase.from('calibragem').upsert([item], { onConflict: 'local_id', ignoreDuplicates: true });
+                    if (error) {
+                         if (error.code === '23505' || error.status === 409) {
+                             console.warn('Sync conflict (calibragem) - ignored:', item.local_id);
+                         } else {
+                             throw error;
+                         }
+                    }
                 } catch (e) {
                     remaining.push(item);
                 }
@@ -11229,10 +11458,15 @@
                 const local_id = (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString());
                 const record = { local_id, created_at: new Date().toISOString(), user_id: user.id, ...data };
                 if (isOnline() && isAuthenticated) {
-                    const { error } = await supabase.from('controle_3p').upsert([record], { onConflict: 'local_id' });
+                    const { error } = await supabase.from('controle_3p').upsert([record], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
-                        queueControle3p({ ...record, offline: true });
-                        showFloatingNotification('warning', 'Falha ao salvar online. Salvo offline e será sincronizado.');
+                        if (error.code === '23505' || error.status === 409) {
+                            showFloatingNotification('success', 'Ficha 3P salva (sincronizada).');
+                            clearControle3pForm();
+                        } else {
+                            queueControle3p({ ...record, offline: true });
+                            showFloatingNotification('warning', 'Falha ao salvar online. Salvo offline e será sincronizado.');
+                        }
                     } else {
                         showFloatingNotification('success', 'Ficha 3P salva.');
                         clearControle3pForm();
@@ -11265,8 +11499,14 @@
             const remaining = [];
             for (const item of queue) {
                 try {
-                    const { error } = await supabase.from('controle_3p').upsert([item], { onConflict: 'local_id' });
-                    if (error) throw error;
+                    const { error } = await supabase.from('controle_3p').upsert([item], { onConflict: 'local_id', ignoreDuplicates: true });
+                    if (error) {
+                         if (error.code === '23505' || error.status === 409) {
+                             console.warn('Sync conflict (controle_3p) - ignored:', item.local_id);
+                         } else {
+                             throw error;
+                         }
+                    }
                 } catch (e) {
                     remaining.push(item);
                 }
