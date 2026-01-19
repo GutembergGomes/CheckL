@@ -641,7 +641,7 @@
         </div>
 
         <!-- Floating Notification Container -->
-        <div id="notificationContainer" class="fixed top-4 right-4 z-50 space-y-3 glass-morphism p-2 rounded-xl"></div>
+        <div id="notificationContainer" class="fixed top-4 right-4 z-50 space-y-3 pointer-events-none"></div>
         <div id="mobileActionBar" class="fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between sm:hidden hidden">
             <div class="flex items-center gap-3">
                 <button onclick="backToSelection()" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300">Voltar</button>
@@ -1402,6 +1402,7 @@
                                 <select id="reformaStatus" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                                     <option value="nao" selected>Não</option>
                                     <option value="sim">Sim</option>
+                                    <option value="aguardando">Aguardando Reforma</option>
                                 </select>
                             </div>
                         </div>
@@ -1592,6 +1593,7 @@
                                 <select id="reformaStatus" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                                     <option value="nao" selected>Não</option>
                                     <option value="sim">Sim</option>
+                                    <option value="aguardando">Aguardando Reforma</option>
                                 </select>
                             </div>
                         </div>
@@ -5158,6 +5160,7 @@
 
                 if (error) {
                     console.error(`Smart sync error for ${tableName}:`, error);
+                    showFloatingNotification('error', `Erro ao sincronizar ${tableName}: ${error.message || error.code}`);
                     // If error (e.g. column not found), fall back to fetching latest
                     return currentData || [];
                 }
@@ -5309,50 +5312,82 @@
             });
         }
 
-        // Helper to ensure user exists in legacy 'users' table
+        // Helper to ensure user exists in legacy 'users' table and new 'usuarios' table
         async function ensureUserRecord() {
             if (!isOnline()) return null;
             const user = (typeof currentUser !== 'undefined' && currentUser) ? currentUser : null;
             if (!user || !user.id || user.id === 'offline') return null;
 
+            // Fix: Clean ID if it's a JSON string (corrupted data protection)
+            let userId = user.id;
+            if (typeof userId === 'string' && userId.startsWith('{')) {
+                try { 
+                    const parsed = JSON.parse(userId);
+                    if (parsed.id) userId = parsed.id;
+                } catch (_) {}
+            }
+
+            const displayName = (typeof getDisplayName === 'function') ? getDisplayName(user) : (user.email || 'User');
+            
+            // 1. ALWAYS ensure user exists in 'usuarios' (New Table) with Auth ID
+            // This is critical for foreign key constraints in inspections table
             try {
-                // 1. Check if user exists by ID
-                const { data: existingById } = await supabase.from('users').select('id').eq('id', user.id).maybeSingle();
+                // Upsert with Auth ID - RLS should allow this as id matches auth.uid()
+                // REMOVED ignoreDuplicates to force update/ensure existence even if record exists
+                const { error } = await supabase.from('usuarios').upsert({
+                    id: userId,
+                    email: user.email,
+                    nome: displayName,
+                    role: 'tecnico',
+                    ativo: true,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'id' });
                 
-                if (existingById) {
-                    return existingById.id;
+                if (error) {
+                    console.warn('Usuarios upsert error:', error);
+                    // Fallback: If 'usuarios' does not exist (renamed?), try 'users' with same schema
+                    if (error.code === '42P01') { // undefined_table
+                         await supabase.from('users').upsert({
+                            id: userId,
+                            email: user.email,
+                            nome: displayName,
+                            name: displayName, // Legacy field
+                            role: 'tecnico',
+                            ativo: true,
+                            updated_at: new Date().toISOString()
+                        }, { onConflict: 'id' });
+                    }
                 }
-                
-                // 2. Check if user exists by Email
-                const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', user.email).maybeSingle();
-                
-                if (existingByEmail) {
-                    // User exists with different ID -> Return that ID
-                    return existingByEmail.id;
-                } else {
-                    // 3. Insert new user
-                    const displayName = (typeof getDisplayName === 'function') ? getDisplayName(user) : (user.email || 'User');
-                    const { error: insertErr } = await supabase.from('users').upsert({
-                        id: user.id,
+            } catch (e) {
+                console.warn('Usuarios upsert exception:', e);
+            }
+
+            // 2. Sync to legacy 'users' table if needed (Best Effort for backward compatibility)
+            try {
+                 // Check if user exists by Email in legacy table
+                 const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', user.email).maybeSingle();
+                 
+                 if (existingByEmail && existingByEmail.id !== userId) {
+                     // User exists in legacy with different ID.
+                     // Log it, but do NOT return legacy ID for new inspections to avoid FK errors in 'usuarios' table.
+                     console.log('Legacy user found with different ID:', existingByEmail.id);
+                 } else {
+                     // Upsert into legacy users with Auth ID
+                     // REMOVED ignoreDuplicates to force update
+                     await supabase.from('users').upsert({
+                        id: userId,
                         email: user.email,
                         name: displayName,
+                        nome: displayName, // Add 'nome' just in case it was renamed/merged
                         role: 'tecnico',
                         created_at: new Date().toISOString(),
-                        user_id: user.id
-                    }, { onConflict: 'id', ignoreDuplicates: true });
-                    
-                    if (insertErr && insertErr.code !== '23505' && insertErr.status !== 409) {
-                         // If insert failed (e.g. race condition), try fetch by email again
-                         const { data: retryByEmail } = await supabase.from('users').select('id').eq('email', user.email).maybeSingle();
-                         if (retryByEmail) return retryByEmail.id;
-                    }
-                    
-                    return user.id;
-                }
-            } catch (err) {
-                console.error('Error ensuring user record:', err);
-                return user.id; // Fallback to current ID
-            }
+                        user_id: userId
+                    }, { onConflict: 'id' });
+                 }
+            } catch (e) { console.warn('Legacy users sync error:', e); }
+
+            // ALWAYS return the Auth ID to ensure consistency with 'usuarios' table and RLS policies
+            return userId;
         }
 
         // Salvar inspeção no Supabase
@@ -5367,7 +5402,8 @@
             const frota = frotaSel && frotaSel.value === 'custom' ? (frotaCustom.value || '').trim() : (frotaSel ? frotaSel.value.trim() : (document.getElementById('frota')?.value || '').trim());
             const mecanico = document.getElementById('mecanico').value.trim();
             const observacao = (document.getElementById('observacao')?.value || '').trim();
-            const reformaStatus = (document.getElementById('reformaStatus')?.value || 'nao') === 'sim';
+            const reformaVal = document.getElementById('reformaStatus')?.value || 'nao';
+            const reformaStatus = reformaVal === 'sim' || reformaVal === 'aguardando';
             const today = new Date().toISOString().split('T')[0];
             
             if (!data || !frota || !mecanico) {
@@ -5503,15 +5539,16 @@
             };
             try {
                 const idxReforma = inspection.items.length;
-                inspection.items.push({ id: idxReforma, name: 'Status: Equipamento em reforma', section: 'Geral', status: reformaStatus ? 'ok' : 'notok', note: reformaStatus ? 'Sim' : 'Não' });
+                inspection.items.push({ id: idxReforma, name: 'Status: Equipamento em reforma', section: 'Geral', status: reformaStatus ? 'ok' : 'notok', note: reformaVal === 'aguardando' ? 'Aguardando Reforma' : (reformaVal === 'sim' ? 'Sim' : 'Não') });
             } catch(_) {}
             const dbInspection = { data: inspection.data, tipo: inspection.tipo, frota: inspection.frota, mecanico: inspection.mecanico, observacao: inspection.observacao, items: inspection.items, results: inspection.results, user_id: inspection.user_id, created_at: inspection.created_at, local_id: inspection.local_id };
 
             try {
                 if (isOnline() && isAuthenticated) {
                     // Update user_id in payload if resolved differently by ensureUserRecord
-                    if (validUserId && validUserId.id && validUserId.id !== dbInspection.user_id) {
-                        dbInspection.user_id = validUserId.id;
+                    // validUserId is the ID string returned by ensureUserRecord
+                    if (validUserId && typeof validUserId === 'string' && validUserId !== dbInspection.user_id) {
+                        dbInspection.user_id = validUserId;
                     }
 
                     const { error } = await supabase
@@ -9103,7 +9140,7 @@
         function applyReformaStatusToItems() {
             try {
                 const refEl = document.getElementById('reformaStatus');
-                const isReforma = refEl && refEl.value === 'sim';
+                const isReforma = refEl && (refEl.value === 'sim' || refEl.value === 'aguardando');
                 if (!Array.isArray(currentInspection.items)) return;
                 currentInspection.items.forEach(it => {
                     const isStatusItem = typeof it.name === 'string' && it.name.indexOf('Status: Equipamento em reforma') !== -1;
@@ -10405,13 +10442,34 @@
             updateNotificationBadge();
         }
 
-        function showFloatingNotification(type, message, duration = 5000) {
+        function showFloatingNotification(type, message, duration = 4000) {
             const container = document.getElementById('notificationContainer');
+            
+            // Check for duplicate messages
+            const existing = Array.from(container.children).find(child => {
+                const msgEl = child.querySelector('p');
+                return msgEl && msgEl.textContent === message;
+            });
+            
+            if (existing) {
+                // If it's a sticky notification, return its ID and don't duplicate
+                if (duration === 0) {
+                    return existing.id;
+                }
+                // For others, remove old so we can show new (bump to bottom)
+                existing.remove();
+            }
+
+            // Limit max notifications (prevent screen clutter)
+            if (container.children.length >= 4) {
+                container.firstElementChild.remove();
+            }
+
             const notificationId = 'notif-' + Date.now();
             
             const notification = document.createElement('div');
             notification.id = notificationId;
-            notification.className = 'notification-slide bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-4 max-w-sm';
+            notification.className = 'notification-slide bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-4 max-w-sm pointer-events-auto transition-all duration-300';
             
             const typeColors = {
                 success: 'border-l-4 border-l-green-500',
@@ -10425,9 +10483,9 @@
             notification.innerHTML = `
                 <div class="flex items-start">
                     <div class="flex-1">
-                        <p class="text-sm text-gray-900 dark:text-white">${message}</p>
+                        <p class="text-sm text-gray-900 dark:text-white font-medium">${message}</p>
                     </div>
-                    <button onclick="document.getElementById('${notificationId}').remove()" class="ml-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    <button onclick="dismissFloatingNotification('${notificationId}')" class="ml-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
@@ -10437,11 +10495,16 @@
             
             container.appendChild(notification);
             
-            const autoDuration = typeof duration === 'number' ? duration : 5000;
+            const autoDuration = typeof duration === 'number' ? duration : 4000;
             if (autoDuration > 0) {
                 setTimeout(() => {
-                    if (document.getElementById(notificationId)) {
-                        notification.remove();
+                    const el = document.getElementById(notificationId);
+                    if (el) {
+                        el.style.opacity = '0';
+                        el.style.transform = 'translateX(100%)';
+                        setTimeout(() => {
+                            if (el.parentNode) el.remove();
+                        }, 300);
                     }
                 }, autoDuration);
             }
@@ -10992,33 +11055,9 @@
                         
                         if (item.user_id === currentIdClean) {
                         try {
-                            // 1. Check if user exists by ID
-                            const { data: existingById } = await supabase.from('users').select('id').eq('id', item.user_id).maybeSingle();
-                            
-                            if (!existingById) {
-                                // 2. Check if user exists by Email
-                                const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
-                                
-                                if (existingByEmail) {
-                                    // User exists with different ID -> Use that ID
-                                    item.user_id = existingByEmail.id;
-                                } else {
-                                    // 3. Insert new user
-                                    const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
-                                    const { error: insertErr } = await supabase.from('users').upsert({
-                                        id: currentUser.id,
-                                        email: currentUser.email,
-                                        name: displayName,
-                                        role: 'tecnico',
-                                        created_at: new Date().toISOString(),
-                                        user_id: currentUser.id
-                                    }, { onConflict: 'id', ignoreDuplicates: true });
-
-                                    if (insertErr && insertErr.code !== '23505' && insertErr.status !== 409) {
-                                        const { data: retryByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
-                                        if (retryByEmail) item.user_id = retryByEmail.id;
-                                    }
-                                }
+                            const validId = await ensureUserRecord();
+                            if (validId && typeof validId === 'string') {
+                                item.user_id = validId;
                             }
                         } catch (_) {}
                     }
@@ -11092,38 +11131,14 @@
                         const currentIdClean = (currentUser.id && currentUser.id.startsWith('{')) ? (() => { try { return JSON.parse(currentUser.id).id; } catch { return currentUser.id; } })() : currentUser.id;
                         
                         if (item.user_id === currentIdClean) {
-                        try {
-                            // 1. Check if user exists by ID
-                            const { data: existingById } = await supabase.from('users').select('id').eq('id', item.user_id).maybeSingle();
-                            
-                            if (!existingById) {
-                                // 2. Check if user exists by Email
-                                const { data: existingByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
-                                
-                                if (existingByEmail) {
-                                    // User exists with different ID -> Use that ID
-                                    item.user_id = existingByEmail.id;
-                                } else {
-                                    // 3. Insert new user
-                                    const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
-                                    const { error: insertErr } = await supabase.from('users').upsert({
-                                        id: currentUser.id,
-                                        email: currentUser.email,
-                                        name: displayName,
-                                        role: 'tecnico',
-                                        created_at: new Date().toISOString(),
-                                        user_id: currentUser.id
-                                    }, { onConflict: 'id', ignoreDuplicates: true });
-
-                                    if (insertErr && insertErr.code !== '23505' && insertErr.status !== 409) {
-                                        const { data: retryByEmail } = await supabase.from('users').select('id').eq('email', currentUser.email).maybeSingle();
-                                        if (retryByEmail) item.user_id = retryByEmail.id;
-                                    }
+                            try {
+                                const validId = await ensureUserRecord();
+                                if (validId && typeof validId === 'string') {
+                                    item.user_id = validId;
                                 }
-                            }
-                        } catch (_) {}
+                            } catch (_) {}
+                        }
                     }
-                }
 
                     const { error } = await supabase
                         .from('irrig_inspections')
@@ -11403,6 +11418,9 @@
 
         async function saveCalibragem() {
             try {
+                // Ensure user exists in DB before saving
+                const validUserId = await ensureUserRecord();
+                
                 const btn = document.getElementById('calBtnSalvar');
                 if (btn) btn.disabled = true;
                 const data = collectCalibragemData();
@@ -11410,7 +11428,11 @@
                 const user = (typeof currentUser !== 'undefined' && currentUser) || getCachedUser() || getOfflineUser();
                 const isAuthenticated = !!(user && user.id && user.id !== 'offline');
                 const local_id = (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString());
-                const record = { local_id, created_at: new Date().toISOString(), user_id: user.id, ...data };
+                
+                // Use validated ID if available
+                const finalUserId = (validUserId && typeof validUserId === 'string') ? validUserId : user.id;
+                
+                const record = { local_id, created_at: new Date().toISOString(), user_id: finalUserId, ...data };
                 if (isOnline() && isAuthenticated) {
                     const { error } = await supabase.from('calibragem').upsert([record], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
@@ -11459,6 +11481,19 @@
             const remaining = [];
             for (const item of queue) {
                 try {
+                    // Fix: Ensure user exists in DB
+                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser) {
+                         const currentIdClean = (currentUser.id && currentUser.id.startsWith('{')) ? (() => { try { return JSON.parse(currentUser.id).id; } catch { return currentUser.id; } })() : currentUser.id;
+                         if (item.user_id === currentIdClean) {
+                            try {
+                                const validId = await ensureUserRecord();
+                                if (validId && typeof validId === 'string') {
+                                    item.user_id = validId;
+                                }
+                            } catch (_) {}
+                         }
+                    }
+
                     const { error } = await supabase.from('calibragem').upsert([item], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
                          if (error.code === '23505' || error.status === 409) {
@@ -11556,6 +11591,9 @@
 
         async function saveControle3p() {
             try {
+                // Ensure user exists in DB before saving
+                const validUserId = await ensureUserRecord();
+                
                 const btn = document.getElementById('c3pBtnSalvar');
                 if (btn) btn.disabled = true;
                 const data = collectControle3pData();
@@ -11563,7 +11601,11 @@
                 const user = (typeof currentUser !== 'undefined' && currentUser) || getCachedUser() || getOfflineUser();
                 const isAuthenticated = !!(user && user.id && user.id !== 'offline');
                 const local_id = (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString());
-                const record = { local_id, created_at: new Date().toISOString(), user_id: user.id, ...data };
+                
+                // Use validated ID if available
+                const finalUserId = (validUserId && typeof validUserId === 'string') ? validUserId : user.id;
+                
+                const record = { local_id, created_at: new Date().toISOString(), user_id: finalUserId, ...data };
                 if (isOnline() && isAuthenticated) {
                     const { error } = await supabase.from('controle_3p').upsert([record], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
@@ -11606,6 +11648,19 @@
             const remaining = [];
             for (const item of queue) {
                 try {
+                    // Fix: Ensure user exists in DB
+                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser) {
+                         const currentIdClean = (currentUser.id && currentUser.id.startsWith('{')) ? (() => { try { return JSON.parse(currentUser.id).id; } catch { return currentUser.id; } })() : currentUser.id;
+                         if (item.user_id === currentIdClean) {
+                            try {
+                                const validId = await ensureUserRecord();
+                                if (validId && typeof validId === 'string') {
+                                    item.user_id = validId;
+                                }
+                            } catch (_) {}
+                         }
+                    }
+
                     const { error } = await supabase.from('controle_3p').upsert([item], { onConflict: 'local_id', ignoreDuplicates: true });
                     if (error) {
                          if (error.code === '23505' || error.status === 409) {
