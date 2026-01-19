@@ -5004,6 +5004,27 @@
                 } else {
                     currentUser = data.user;
                     setCachedUser(data.user);
+                    
+                    // Auto-register user if not exists in 'users' table (Self-Healing)
+                    if (data.user) {
+                        try {
+                            // Check by ID first (most reliable)
+                            const { data: existing } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
+                            if (!existing) {
+                                const newName = (data.user.user_metadata && (data.user.user_metadata.name || data.user.user_metadata.full_name || data.user.user_metadata.first_name)) || (data.user.email?.split('@')[0] || 'Usuário');
+                                await supabase.from('users').insert({
+                                    id: data.user.id,
+                                    email: data.user.email,
+                                    name: newName,
+                                    role: 'tecnico',
+                                    approved: false, // Must wait for approval
+                                    created_at: new Date().toISOString()
+                                });
+                                console.log('User auto-registered in public.users');
+                            }
+                        } catch (e) { console.warn('Auto-register failed', e); }
+                    }
+
                     showApp();
                     const dn = (currentUser.user_metadata && ((currentUser.user_metadata.first_name||'').trim() + ' ' + (currentUser.user_metadata.last_name||'').trim()).trim()) || currentUser.email.split('@')[0];
                     showFloatingNotification('success', `Bem-vindo, ${dn}!`);
@@ -12250,14 +12271,40 @@
         function adminCopyAuthSyncSQL() {
             const sql = [
                 'begin;',
+                '--',
+                '-- 1. Corrige o trigger automatico para novos usuarios',
+                'CREATE OR REPLACE FUNCTION public.handle_new_user()',
+                'RETURNS TRIGGER AS $$',
+                'BEGIN',
+                '  INSERT INTO public.users (id, email, name, role, approved)',
+                '  VALUES (',
+                '    new.id,',
+                '    new.email,',
+                "    COALESCE(new.raw_user_meta_data->>'first_name', split_part(new.email, '@', 1)) || ' ' || COALESCE(new.raw_user_meta_data->>'last_name', ''),",
+                "    'tecnico',",
+                '    true',
+                '  )',
+                '  ON CONFLICT (id) DO UPDATE',
+                '  SET email = EXCLUDED.email,',
+                '      name = EXCLUDED.name;',
+                '  RETURN new;',
+                'END;',
+                '$$ LANGUAGE plpgsql SECURITY DEFINER;',
+                '',
+                'DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;',
+                'CREATE TRIGGER on_auth_user_created',
+                '  AFTER INSERT ON auth.users',
+                '  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();',
+                '',
+                '-- 2. Cria funcao RPC para sincronizacao manual',
                 'create or replace function public.sync_users_from_auth() returns void language plpgsql security definer set search_path = public as $$',
                 'begin',
-                '  insert into public.users (email, name, user_id, email_confirmed, approved, last_seen, created_at)',
+                '  insert into public.users (email, name, id, email_confirmed, approved, last_seen, created_at)',
                 '  select u.email,',
                 "         coalesce(trim((u.raw_user_meta_data->>'first_name')||' '||(u.raw_user_meta_data->>'last_name')), split_part(u.email,'@',1)),",
-                '         u.id::text,',
+                '         u.id::uuid,',
                 '         (u.email_confirmed_at is not null),',
-                '         false,',
+                '         true,',
                 '         now(),',
                 '         coalesce(u.created_at, now())',
                 '  from auth.users u',
@@ -12409,7 +12456,8 @@
             try {
                 const u = currentUser || getCachedUser();
                 if (!u || !u.email) return null;
-                const base = { email: u.email, name: getDisplayName(u), user_id: u.id, email_confirmed: !!(u.email_confirmed_at || u.confirmed_at), last_seen: new Date().toISOString() };
+                // FIX: Use 'id' instead of 'user_id' to match public.users table schema
+                const base = { email: u.email, name: getDisplayName(u), id: u.id, email_confirmed: !!(u.email_confirmed_at || u.confirmed_at), last_seen: new Date().toISOString() };
                 if (isOnline()) {
                     const { data, error } = await supabase.from('users').select('*').eq('email', u.email).limit(1);
                     if (!error && data && data[0]) {
