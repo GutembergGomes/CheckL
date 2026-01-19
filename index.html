@@ -5341,13 +5341,20 @@
             const user = (typeof currentUser !== 'undefined' && currentUser) || getCachedUser() || getOfflineUser();
             const isAuthenticated = !!(user && user.id && user.id !== 'offline');
             const localId = (crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString());
+            const itemsForSave = Array.isArray(currentInspection.items)
+                ? currentInspection.items.map(it => {
+                    const clone = Object.assign({}, it);
+                    if (Object.prototype.hasOwnProperty.call(clone, 'photos')) clone.photos = [];
+                    return clone;
+                })
+                : [];
             const inspection = {
                 data: data,
                 tipo: currentEquipment,
                 frota: frota,
                 mecanico: mecanico,
                 observacao: observacao,
-                items: currentInspection.items,
+                items: itemsForSave,
                 results: currentInspection.results,
                 user_id: user.id,
                 created_at: new Date().toISOString(),
@@ -5361,6 +5368,26 @@
 
             try {
                 if (isOnline() && isAuthenticated) {
+                    // FIX: Ensure user exists in legacy 'users' table before inserting inspection
+                    try {
+                        if (user.id && user.id !== 'offline') {
+                            const { count } = await supabase.from('users').select('id', { count: 'exact', head: true }).eq('id', user.id);
+                            if (count === 0) {
+                                const displayName = (typeof getDisplayName === 'function') ? getDisplayName(user) : (user.email || 'User');
+                                await supabase.from('users').upsert({
+                                    id: user.id,
+                                    email: user.email,
+                                    name: displayName,
+                                    role: 'tecnico',
+                                    created_at: new Date().toISOString(),
+                                    user_id: user.id
+                                }, { onConflict: 'id' });
+                            }
+                        }
+                    } catch (legacyErr) {
+                        console.error('Legacy user sync error:', legacyErr);
+                    }
+
                     const { error } = await supabase
                         .from('inspections')
                         .upsert([dbInspection], { onConflict: 'local_id' });
@@ -6855,7 +6882,7 @@
                             <span class="w-2 h-2 rounded-full ${statusDot}"></span>
                             <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Status</span>
                         </div>
-                        <span class="text-lg font-bold mb-1">${label}</span>
+                        <span class="text-lg font-bold mb-1 text-gray-900 dark:text-gray-100">${label}</span>
                         <span class="text-sm font-medium mb-1">${statusLabel}</span>
                         ${last ? `<span class="text-[10px] opacity-75">${formatDateBR(last.data)}</span>` : '<span class="text-[10px] opacity-50">-</span>'}
                     </div>`;
@@ -7110,7 +7137,7 @@
                             <span class="w-2 h-2 rounded-full ${statusDot}"></span>
                             <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Status</span>
                         </div>
-                        <span class="text-lg font-bold mb-1">${label}</span>
+                        <span class="text-lg font-bold mb-1 text-gray-900 dark:text-gray-100">${label}</span>
                         <span class="text-sm font-medium mb-1">${statusLabel}</span>
                         ${last ? `<span class="text-[10px] opacity-75">${formatDateBR(last.data)}</span>` : '<span class="text-[10px] opacity-50">-</span>'}
                     </div>`;
@@ -7402,7 +7429,7 @@
                             <span class="w-2 h-2 rounded-full ${statusDot}"></span>
                             <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Status</span>
                         </div>
-                        <span class="text-lg font-bold mb-1">${label}</span>
+                        <span class="text-lg font-bold mb-1 text-gray-900 dark:text-gray-100">${label}</span>
                         <span class="text-sm font-medium mb-1">${statusLabel}</span>
                         ${last ? `<span class="text-[10px] opacity-75">${formatDateBR(last.data)}</span>` : '<span class="text-[10px] opacity-50">-</span>'}
                     </div>`;
@@ -8057,23 +8084,6 @@
             const files = Array.from(fileList).slice(0, 6);
             for (const f of files) {
                 try {
-                    const canUpload = isOnline() && currentUser && currentUser.id && INSPECTION_PHOTOS_BUCKET;
-                    if (canUpload) {
-                        const safeName = (f.name || 'foto').replace(/[^A-Za-z0-9._-]/g, '_');
-                        const key = `${irrPhotoSessionId}/${itemId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${safeName}`;
-                        const up = await supabase.storage.from(INSPECTION_PHOTOS_BUCKET).upload(key, f, { contentType: f.type || 'image/jpeg', upsert: true });
-                        if (up && !up.error) {
-                            const pub = supabase.storage.from(INSPECTION_PHOTOS_BUCKET).getPublicUrl(key);
-                            const url = String((pub && pub.data && pub.data.publicUrl) || '');
-                            if (url) {
-                                if (!Array.isArray(irrCurrentInspection.items[itemId].photos)) irrCurrentInspection.items[itemId].photos = [];
-                                irrCurrentInspection.items[itemId].photos.push(url);
-                                renderIrrItemPhotos(itemId);
-                                saveIrrDraft();
-                                continue;
-                            }
-                        }
-                    }
                     const reader = new FileReader();
                     await new Promise((resolve) => {
                         reader.onload = () => {
@@ -8227,6 +8237,13 @@
             const user = (typeof currentUser !== 'undefined' && currentUser) || getCachedUser() || getOfflineUser();
             const isAuthenticated = !!(user && user.id && user.id !== 'offline');
             const record = JSON.parse(JSON.stringify(irrCurrentInspection));
+            if (Array.isArray(record.items)) {
+                record.items = record.items.map(it => {
+                    const clone = Object.assign({}, it);
+                    if (Object.prototype.hasOwnProperty.call(clone, 'photos')) clone.photos = [];
+                    return clone;
+                });
+            }
             record.user_id = user && user.id ? user.id : null;
             const dbInspection = { data: record.data, tipo: record.tipo, frota: record.frota, mecanico: record.mecanico, observacao: record.observacao, items: record.items, results: record.results, user_id: record.user_id, created_at: record.created_at, local_id: record.local_id };
             let savedOnline = false;
@@ -8945,22 +8962,6 @@
             const files = Array.from(fileList).slice(0, 6);
             for (const f of files) {
                 try {
-                    const canUpload = isOnline() && currentUser && currentUser.id && INSPECTION_PHOTOS_BUCKET;
-                    if (canUpload) {
-                        const safeName = (f.name || 'foto').replace(/[^A-Za-z0-9._-]/g, '_');
-                        const key = `${currentPhotoSessionId}/${itemId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${safeName}`;
-                        const up = await supabase.storage.from(INSPECTION_PHOTOS_BUCKET).upload(key, f, { contentType: f.type || 'image/jpeg', upsert: true });
-                        if (up && !up.error) {
-                            const pub = supabase.storage.from(INSPECTION_PHOTOS_BUCKET).getPublicUrl(key);
-                            const url = String((pub && pub.data && pub.data.publicUrl) || '');
-                            if (url) {
-                                if (!Array.isArray(currentInspection.items[itemId].photos)) currentInspection.items[itemId].photos = [];
-                                currentInspection.items[itemId].photos.push(url);
-                                renderItemPhotos(itemId);
-                                continue;
-                            }
-                        }
-                    }
                     const reader = new FileReader();
                     await new Promise((resolve) => {
                         reader.onload = () => {
@@ -10732,9 +10733,35 @@
             const remaining = [];
             for (const item of queue) {
                 try {
+                    const cleanItems = Array.isArray(item.items)
+                        ? item.items.map(it => {
+                            const clone = Object.assign({}, it);
+                            if (Object.prototype.hasOwnProperty.call(clone, 'photos')) clone.photos = [];
+                            return clone;
+                        })
+                        : [];
+
+                    // FIX: Ensure user exists in legacy 'users' table
+                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser && item.user_id === currentUser.id) {
+                        try {
+                            const { count } = await supabase.from('users').select('id', { count: 'exact', head: true }).eq('id', item.user_id);
+                            if (count === 0) {
+                                const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
+                                await supabase.from('users').upsert({
+                                    id: currentUser.id,
+                                    email: currentUser.email,
+                                    name: displayName,
+                                    role: 'tecnico',
+                                    created_at: new Date().toISOString(),
+                                    user_id: currentUser.id
+                                }, { onConflict: 'id' });
+                            }
+                        } catch (_) {}
+                    }
+
                     const { error } = await supabase
                         .from('inspections')
-                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, items: item.items, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id' });
+                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, items: cleanItems, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id' });
                     if (error) { throw error; }
                     try { await supabase.from('system_events').insert([{ type:'new_inspection', title:'Nova inspeção', message: `${item.tipo||''} • ${item.frota||''} • ${item.mecanico||''}`, payload: { tipo: item.tipo||'', frota: item.frota||'', mecanico: item.mecanico||'', data: item.data||'', local_id: item.local_id||'', modulo: 'cct' } }]); } catch(_) {}
                     try { systemBroadcastChannel && systemBroadcastChannel.send({ type:'broadcast', event:'new_inspection', payload: { modulo:'cct', tipo: item.tipo||'', frota: item.frota||'', mecanico: item.mecanico||'', data: item.data||'', local_id: item.local_id||'' } }); } catch(_) {}
@@ -10755,9 +10782,35 @@
             const remaining = [];
             for (const item of queue) {
                 try {
+                    const cleanItems = Array.isArray(item.items)
+                        ? item.items.map(it => {
+                            const clone = Object.assign({}, it);
+                            if (Object.prototype.hasOwnProperty.call(clone, 'photos')) clone.photos = [];
+                            return clone;
+                        })
+                        : [];
+
+                    // FIX: Ensure user exists in legacy 'users' table
+                    if (item.user_id && item.user_id !== 'offline' && typeof currentUser !== 'undefined' && currentUser && item.user_id === currentUser.id) {
+                        try {
+                            const { count } = await supabase.from('users').select('id', { count: 'exact', head: true }).eq('id', item.user_id);
+                            if (count === 0) {
+                                const displayName = (typeof getDisplayName === 'function') ? getDisplayName(currentUser) : (currentUser.email || 'User');
+                                await supabase.from('users').upsert({
+                                    id: currentUser.id,
+                                    email: currentUser.email,
+                                    name: displayName,
+                                    role: 'tecnico',
+                                    created_at: new Date().toISOString(),
+                                    user_id: currentUser.id
+                                }, { onConflict: 'id' });
+                            }
+                        } catch (_) {}
+                    }
+
                     const { error } = await supabase
                         .from('irrig_inspections')
-                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, observacao: item.observacao, items: item.items, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id' });
+                        .upsert([{ data: item.data, tipo: item.tipo, frota: item.frota, mecanico: item.mecanico, observacao: item.observacao, items: cleanItems, results: item.results, user_id: item.user_id, created_at: item.created_at, local_id: item.local_id }], { onConflict: 'local_id' });
                     if (error) throw error;
                 } catch (_) { remaining.push(item); }
             }
